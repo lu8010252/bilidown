@@ -44,6 +44,8 @@ type TaskInDB struct {
 	TaskInitOption
 	ID       int64     `json:"id"`
 	CreateAt time.Time `json:"createAt"`
+	// FileGone 表示任务已完成但服务器上的文件已不存在（例如已“下载到本机”并清理），仅在返回任务列表时计算。
+	FileGone bool `json:"fileGone"`
 }
 
 func (task *TaskInDB) FilePath() string {
@@ -116,7 +118,19 @@ func (task *Task) Start() {
 	}
 	client := &bilibili.BiliClient{SESSDATA: sessdata}
 
+	// 任务没有成功完成时，清理遗留的临时文件，避免失败的任务白占磁盘
+	defer func() {
+		if task.Status != "done" {
+			task.cleanupTemp()
+		}
+	}()
+
 	GlobalDownloadSem.Acquire()
+	if err := util.CheckDisk(task.Folder, 0); err != nil {
+		GlobalDownloadSem.Release()
+		task.UpdateStatus(db, "error", err)
+		return
+	}
 	task.UpdateStatus(db, "running")
 
 	if task.DownloadType == "audio" {
@@ -207,6 +221,18 @@ func (task *Task) Start() {
 			log.Printf("添加元数据失败 (任务ID: %d): %v", task.ID, err)
 		}
 		task.UpdateStatus(db, "done")
+	}
+}
+
+// cleanupTemp 删除该任务可能遗留的 .audio / .video / 元数据临时文件
+func (task *Task) cleanupTemp() {
+	id := strconv.FormatInt(task.ID, 10)
+	for _, p := range []string{
+		filepath.Join(task.Folder, id+".audio"),
+		filepath.Join(task.Folder, id+".video"),
+		task.TaskInDB.FilePath() + ".tmp.mp4",
+	} {
+		_ = os.Remove(p)
 	}
 }
 
@@ -318,6 +344,14 @@ func DownloadMedia(client *bilibili.BiliClient, _url string, task *Task, mediaTy
 
 	if err != nil {
 		return err
+	}
+	defer resp.Body.Close()
+
+	// 已知大小时先确认空间够用（合并阶段还会再占用一份，所以按 2 倍估算）
+	if resp.ContentLength > 0 {
+		if err := util.CheckDisk(task.Folder, uint64(resp.ContentLength)*2); err != nil {
+			return err
+		}
 	}
 
 	filename := strconv.FormatInt(task.ID, 10) + "." + mediaType
@@ -498,4 +532,4 @@ func (task *Task) addMetadata(filePath string) error {
 	}
 
 	return nil
-}
+}

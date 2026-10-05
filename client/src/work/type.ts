@@ -253,6 +253,8 @@ export type TaskInDB = TaskInitData & {
     folder: string
     createAt: string
     status: TaskStatus
+    /** 任务已完成但服务器上的文件已不存在（已下载到本机并清理） */
+    fileGone?: boolean
 }
 
 export type TaskStatus = 'done' | 'waiting' | 'running' | 'error'
@@ -274,4 +276,4 @@ export type FavListItem = {
     ugc: {
         first_cid: number
     }
-}
+}

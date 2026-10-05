@@ -3,9 +3,8 @@ package router
 import (
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
-	"strings"
+
 	"bilidown/bilibili"
 	"bilidown/util"
 	"bilidown/util/res_error"
@@ -131,11 +130,14 @@ func getPopularVideos(w http.ResponseWriter, r *http.Request) {
 	util.Res{Success: true, Message: "获取成功", Data: bvidList}.Write(w)
 }
 
+// downloadVideo 供网页播放器使用：按任务 ID 提供已完成任务的文件（支持 Range 拖动进度）。
+// 原实现按调用方传入的任意路径读取文件，存在任意文件读取风险，现改为只能通过任务 ID 访问。
 var downloadVideo = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	safePath := filepath.Clean(path)
-	safePath = strings.ReplaceAll(safePath, "\\", "/")
-	http.ServeFile(w, r, safePath)
+	t, ok := lookupDoneTask(w, r)
+	if !ok {
+		return
+	}
+	http.ServeFile(w, r, t.FilePath())
 })
 
 var getSeasonsArchivesListFirstBvid = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
