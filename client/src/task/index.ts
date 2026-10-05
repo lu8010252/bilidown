@@ -1,10 +1,9 @@
 import van, { State } from 'vanjs-core'
 import { Route, goto, now } from 'vanjs-router'
 import { checkLogin, GLOBAL_HAS_LOGIN, GLOBAL_HIDE_PAGE, ResJSON, VanComponent } from '../mixin'
-import { deleteTask, fetchFileUrl, getActiveTask, getTaskList, playFileUrl } from './data'
+import { deleteTask, fetchFileUrl, getActiveTask, getTaskList } from './data'
 import { TaskInDB, TaskStatus } from '../work/type'
 import { LoadingBox } from '../view'
-import { PlayerModalComp } from './playerModal'
 
 const { div, span } = van.tags
 
@@ -12,9 +11,6 @@ const { svg, path } = van.tags('http://www.w3.org/2000/svg')
 
 export class TaskRoute implements VanComponent {
     element: HTMLElement
-    /** 包含视频播放器的模态框 */
-    playerModalComp = new PlayerModalComp()
-
     loading = van.state(false)
 
     taskList: State<(TaskInDB & {
@@ -54,15 +50,7 @@ export class TaskRoute implements VanComponent {
                                 class: () => `list-group-item p-0 hstack user-select-none ${task.statusState.val != 'done' && task.statusState.val != 'error' || task.transferring.val ? 'disabled' : ''}`,
                                 hidden: task.deleting,
                             },
-                                div({
-                                    class: 'vstack gap-2 py-2 px-3',
-                                    style: `cursor: pointer;`,
-                                    onclick() {
-                                        const src = playFileUrl(task.id)
-                                        if (task.statusState.val != 'done' || task.goneState.val) return
-                                        _that.playerModalComp.open(src, task.title, task.downloadType === 'audio' ? 'audio' : 'video')
-                                    }
-                                },
+                                div({ class: 'vstack gap-2 py-2 px-3' },
                                     div({
                                         class: () => `
                                         ${task.statusState.val == 'error' ? 'text-danger' : ''}

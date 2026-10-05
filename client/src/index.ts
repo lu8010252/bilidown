@@ -12,7 +12,6 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import './scss/index.scss'
 import './scss/appearance.scss'
 import { initAppearance } from './appearance'
-import { PlayerModalComp } from './task/playerModal'
 
 const { div } = van.tags
 
