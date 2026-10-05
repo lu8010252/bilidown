@@ -1,6 +1,7 @@
 import van from 'vanjs-core'
 import { now } from 'vanjs-router'
 import { GLOBAL_HAS_LOGIN } from './mixin'
+import { ThemeToggle } from './appearance/view'
 
 const { a, div } = van.tags
 
@@ -22,6 +23,7 @@ export default () => {
             div({ class: 'nav-item', hidden: GLOBAL_HAS_LOGIN },
                 a({ class: classStr('login'), href: '#/login' }, '扫码登录')
             ),
-        )
+        ),
+        ThemeToggle(),
     )
 }
