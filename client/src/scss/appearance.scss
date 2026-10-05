@@ -1,0 +1,94 @@
+// 外观：背景渐变、玻璃效果。主题（深/浅）由 Bootstrap 的 data-bs-theme 负责。
+
+:root {
+    --app-bg: none;
+    --glass-blur: 14px;
+    --glass-alpha: 0.55;
+}
+
+body {
+    background-image: var(--app-bg);
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-attachment: fixed;
+    min-height: 100vh;
+}
+
+.app-panel {
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+}
+
+// 背景配色色块
+.swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    background: transparent;
+    color: var(--bs-body-color);
+    border: 2px solid transparent;
+    border-radius: var(--bs-border-radius);
+    cursor: pointer;
+
+    .swatch-dot {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 1px solid var(--bs-border-color);
+        // “纯色”没有渐变，用 Bootstrap 的背景色显示
+        background-color: var(--bs-body-bg);
+    }
+
+    &.active {
+        border-color: var(--bs-primary);
+    }
+
+    &:hover:not(.active) {
+        border-color: var(--bs-border-color);
+    }
+}
+
+// 玻璃效果：给容器类元素加半透明底色 + 背景模糊
+.glass-on {
+    --glass-bg: rgba(var(--bs-body-bg-rgb), var(--glass-alpha));
+    --glass-border: rgba(255, 255, 255, 0.45);
+    --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.12);
+
+    .app-panel,
+    .modal-content,
+    .dropdown-menu,
+    .list-group {
+        background-color: var(--glass-bg);
+        border-color: var(--glass-border);
+        box-shadow: var(--glass-shadow);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+    }
+
+    // 列表项交给外层 .list-group 去显示玻璃底，自己保持透明（选中项除外）
+    .list-group-item:not(.active) {
+        background-color: transparent;
+        border-color: var(--glass-border);
+    }
+
+    .form-control,
+    .form-select,
+    .input-group-text {
+        background-color: rgba(var(--bs-body-bg-rgb), calc(var(--glass-alpha) * 0.8));
+        border-color: var(--glass-border);
+        -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+        backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+    }
+
+    .modal-backdrop {
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+    }
+}
+
+[data-bs-theme='dark'] .glass-on {
+    --glass-border: rgba(255, 255, 255, 0.14);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}

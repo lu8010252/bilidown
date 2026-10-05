@@ -2,6 +2,7 @@ import van from 'vanjs-core'
 import { Route, goto } from 'vanjs-router'
 import { checkLogin, GLOBAL_HAS_LOGIN, VanComponent } from '../mixin'
 import { SaveFolderSetting } from './view'
+import { AppearanceSetting } from '../appearance/view'
 import { getFields } from './data'
 import { LoadingBox } from '../view'
 
@@ -33,6 +34,7 @@ export class SettingRoute implements VanComponent {
                     () => _that.loading.val ? LoadingBox() : '',
                     () => _that.loading.val ? '' : div({ class: 'vstack gap-4' },
                         SaveFolderSetting(_that),
+                        AppearanceSetting(),
                         div({ class: 'hstack gap-3' },
                             button({
                                 class: 'btn btn-outline-secondary', onclick() {

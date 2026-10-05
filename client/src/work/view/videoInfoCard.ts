@@ -185,7 +185,7 @@ const InputGroup = (title: Val<string>, value: State<string>, option?: {
     return div({ class: 'input-group input-group-sm shadow-sm rounded' },
         div({ class: 'input-group-text' }, title),
         van.tags[option?.elementType || 'input']({
-            class: 'form-control bg-white',
+            class: 'form-control',
             disabled: option?.disabled || false,
             style: 'cursor: text;',
             value
