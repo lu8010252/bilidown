@@ -38,9 +38,6 @@ export const getTaskList = async (page: number, pageSize: number): Promise<TaskI
 /** 已完成任务的“下载到本机”地址：浏览器完整收到文件后，服务器会删除该文件 */
 export const fetchFileUrl = (id: number) => `/api/fetchFile?id=${id}`
 
-/** 网页播放器使用的地址（不会删除服务器文件） */
-export const playFileUrl = (id: number) => `/api/downloadVideo?id=${id}`
-
 /** 用于刷新任务实时进度 */
 type ActiveTask = {
     bvid: string

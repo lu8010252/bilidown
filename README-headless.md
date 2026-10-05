@@ -6,7 +6,7 @@
 - 任务列表新增 **↓ 下载到本机** 按钮：浏览器完整收到文件后，服务器才删除该文件，服务器只做临时中转。传输中断则文件保留，可重试。
 - 磁盘保护：下载前检查剩余空间（`BILIDOWN_MIN_FREE_MB`，默认 1024），空间不足时拒绝任务；任务失败时自动清理 `.audio` / `.video` 临时文件。
 - 可选访问密码：`BILIDOWN_AUTH=用户名:密码`（HTTP Basic）。
-- 安全修复：原 `/api/downloadVideo` 接受任意路径，可读取服务器上任意文件；现改为只能按任务 ID 取已完成任务的文件。移除了在服务器上调用 explorer/xdg-open 的 `/api/showFile`。
+- 安全修复：移除原 `/api/downloadVideo`（接受任意路径，可读取服务器上任意文件）和在服务器上调用 explorer/xdg-open 的 `/api/showFile`；同时去掉应用内的播放预览，文件只能按任务 ID 通过 `/api/fetchFile` 下载。
 
 ## 环境变量
 
