@@ -21,7 +21,8 @@ func API() *http.ServeMux {
 	router.HandleFunc("/createTask", createTask)
 	router.HandleFunc("/getActiveTask", getActiveTask)
 	router.HandleFunc("/getTaskList", getTaskList)
-	router.HandleFunc("/showFile", showFile)
+	// /showFile 会在服务器上调用 explorer/open/xdg-open，无头部署下既无意义又有风险，因此不再注册。
+	router.HandleFunc("/fetchFile", fetchFile)
 	router.HandleFunc("/getFields", getFields)
 	router.HandleFunc("/saveFields", saveFields)
 	router.HandleFunc("/logout", logout)

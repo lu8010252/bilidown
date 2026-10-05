@@ -138,6 +138,10 @@ func MustGetDB(path ...string) *sql.DB {
 	pathStr := ""
 	if len(path) == 0 {
 		pathStr = "./data.db"
+		// 容器部署时可用 BILIDOWN_DB 指定数据库文件位置（便于挂载数据卷）
+		if p := os.Getenv("BILIDOWN_DB"); p != "" {
+			pathStr = p
+		}
 	} else if len(path) > 1 {
 		log.Fatalln(errors.New("len(path) <= 1"))
 	} else {

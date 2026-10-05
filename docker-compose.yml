@@ -1,0 +1,17 @@
+services:
+  bilidown:
+    build: .
+    container_name: bilidown
+    restart: unless-stopped
+    ports:
+      - "8098:8098"
+    environment:
+      - TZ=Asia/Shanghai
+      # 访问密码（HTTP Basic 认证）：格式 用户名:密码。务必修改！留空则不设防，仅限纯内网使用
+      - BILIDOWN_AUTH=admin:change-me
+      # 磁盘保护：下载分区剩余空间低于该值（MB）时拒绝新任务；0 为关闭
+      - BILIDOWN_MIN_FREE_MB=1024
+    volumes:
+      - ./data:/data          # 数据库（登录状态、任务记录）
+      - ./download:/app/download   # 下载中转目录，建议换成大容量 U 盘/硬盘路径
+    mem_limit: 512m

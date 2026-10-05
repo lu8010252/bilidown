@@ -1,153 +1,90 @@
 package main
 
 import (
+	"crypto/subtle"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
-	"time"
+	"strconv"
+	"strings"
 
 	"bilidown/router"
 	"bilidown/util"
 
-	"github.com/getlantern/systray"
 	_ "modernc.org/sqlite"
 )
 
 const (
-	HTTP_PORT = 8098      // 限定 HTTP 服务器端口
-	HTTP_HOST = ""        // 限定 HTTP 服务器主机
-	VERSION   = "v2.1.1" // 软件版本号，将影响托盘标题显示
+	DEFAULT_PORT = 8098              // 默认 HTTP 端口，可用环境变量 BILIDOWN_PORT 覆盖
+	VERSION      = "v2.1.1-headless" // 无托盘、无头运行的分支版本
 )
-
-var urlLocal = fmt.Sprintf("http://127.0.0.1:%d", HTTP_PORT)
-var urlLocalUnix = fmt.Sprintf("%s?___%d", urlLocal, time.Now().UnixMilli())
 
 func main() {
 	checkFFmpeg()
-	// 启动托盘程序
-	systray.Run(onReady, nil)
-}
-
-func onReady() {
-	// 设置托盘图标
-	setIcon()
-	// 设置托盘标题
-	setTitle()
-	// 设置托盘菜单
-	setMenuItem()
 	// 初始化数据表
 	mustInitTables()
-	// 配置和启动 HTTP 服务器
+	// 配置并启动 HTTP 服务器（阻塞）
 	mustRunServer()
-	// 调用默认浏览器访问端口
-	time.Sleep(time.Millisecond * 1000)
-	openBrowser(urlLocalUnix)
-	// 保持运行
-	select {}
 }
 
-// checkFFmpeg 检测 ffmpeg 的安装情况，如果未安装则打印提示信息。
+// checkFFmpeg 检测 ffmpeg 的安装情况，如果未安装则打印提示信息并退出。
 func checkFFmpeg() {
 	if _, err := util.GetFFmpegPath(); err != nil {
-		fmt.Println("🚨 FFmpeg is missing. Install it from https://www.ffmpeg.org/download.html or place it in ./bin, then restart the application.")
-		select {}
+		log.Fatalln("🚨 FFmpeg is missing. Install it (e.g. apt install ffmpeg) or place it in ./bin, then restart the application.")
 	}
+}
+
+// listenAddr 返回监听地址。BILIDOWN_HOST 默认为空（监听所有网卡），BILIDOWN_PORT 默认 8098。
+func listenAddr() string {
+	port := DEFAULT_PORT
+	if s := os.Getenv("BILIDOWN_PORT"); s != "" {
+		p, err := strconv.Atoi(s)
+		if err != nil || p <= 0 || p > 65535 {
+			log.Fatalln("BILIDOWN_PORT 不是合法端口:", s)
+		}
+		port = p
+	}
+	return fmt.Sprintf("%s:%d", os.Getenv("BILIDOWN_HOST"), port)
+}
+
+// withAuth 在设置了环境变量 BILIDOWN_AUTH=用户名:密码 时启用 HTTP Basic 认证，未设置则不做任何限制。
+func withAuth(next http.Handler) http.Handler {
+	cred := os.Getenv("BILIDOWN_AUTH")
+	if cred == "" {
+		return next
+	}
+	user, pass, ok := strings.Cut(cred, ":")
+	if !ok || user == "" {
+		log.Fatalln("BILIDOWN_AUTH 格式应为 用户名:密码")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, has := r.BasicAuth()
+		okUser := subtle.ConstantTimeCompare([]byte(u), []byte(user)) == 1
+		okPass := subtle.ConstantTimeCompare([]byte(p), []byte(pass)) == 1
+		if !has || !okUser || !okPass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Bilidown"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // 配置和启动 HTTP 服务器
 func mustRunServer() {
+	mux := http.NewServeMux()
 	// 前端打包文件
-	http.Handle("/", http.FileServer(http.Dir("static")))
+	mux.Handle("/", http.FileServer(http.Dir("static")))
 	// 后端接口服务
-	http.Handle("/api/", http.StripPrefix("/api", router.API()))
-	// 启动 HTTP 服务器
-	go func() {
-		err := http.ListenAndServe(fmt.Sprintf("%s:%d", HTTP_HOST, HTTP_PORT), nil)
-		if err != nil {
-			log.Fatal("http.ListenAndServe:", err)
-		}
-	}()
-}
+	mux.Handle("/api/", http.StripPrefix("/api", router.API()))
 
-// openBrowser 调用系统默认浏览器打开指定 URL
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	default:
-		log.Printf("openBrowser: %v.", errors.New("unsupported operating system"))
+	addr := listenAddr()
+	log.Printf("Bilidown %s listening on %s", VERSION, addr)
+	if err := http.ListenAndServe(addr, withAuth(mux)); err != nil {
+		log.Fatal("http.ListenAndServe:", err)
 	}
-	if err := cmd.Start(); err != nil {
-		log.Printf("openBrowser: %v.", err)
-	}
-	fmt.Printf("Opened in default browser: %s.\n", url)
-}
-
-// setIcon 设置托盘图标
-func setIcon() {
-	var path string
-	if runtime.GOOS == "windows" {
-		path = "static/favicon.ico"
-	} else {
-		path = "static/favicon-32x32.png"
-	}
-	systray.SetIcon(mustReadFile(path))
-}
-
-// mustReadFile 返回文件字节内容
-func mustReadFile(path string) []byte {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		log.Fatalln("os.ReadFile:", err)
-	}
-	return data
-}
-
-// setTitle 设置托盘标题和工具提示
-func setTitle() {
-	title := "Bilidown"
-	tooltip := fmt.Sprintf("%s 视频解析器 %s (port:%d)", title, VERSION, HTTP_PORT)
-	// only available on Mac and Windows.
-	systray.SetTooltip(tooltip)
-}
-
-// setMenuItem 设置托盘菜单
-func setMenuItem() {
-	openBrowserItemText := fmt.Sprintf("打开主界面 (port:%d)", HTTP_PORT)
-	openBrowserItem := systray.AddMenuItem(openBrowserItemText, openBrowserItemText)
-	go func() {
-		for {
-			<-openBrowserItem.ClickedCh
-			openBrowser(urlLocalUnix)
-		}
-	}()
-
-	aboutItemText := "Github 项目主页"
-	aboutItem := systray.AddMenuItem(aboutItemText, aboutItemText)
-	go func() {
-		for {
-			<-aboutItem.ClickedCh
-			openBrowser("https://github.com/iuroc/bilidown")
-		}
-	}()
-
-	exitItemText := "退出应用"
-	exitItem := systray.AddMenuItem(exitItemText, exitItemText)
-	go func() {
-		<-exitItem.ClickedCh
-		log.Printf("Bilidown has exited.")
-		systray.Quit()
-	}()
 }
 
 // mustInitTables 初始化数据表
