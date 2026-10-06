@@ -46,6 +46,8 @@ type TaskInDB struct {
 	CreateAt time.Time `json:"createAt"`
 	// FileGone 表示任务已完成但服务器上的文件已不存在（例如已“下载到本机”并清理），仅在返回任务列表时计算。
 	FileGone bool `json:"fileGone"`
+	// FileSize 文件仍在服务器上时的真实大小（字节），仅在返回任务列表时计算。
+	FileSize int64 `json:"fileSize"`
 }
 
 func (task *TaskInDB) FilePath() string {

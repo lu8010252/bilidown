@@ -1,6 +1,6 @@
 import van, { State } from 'vanjs-core'
 import { Route, goto, now } from 'vanjs-router'
-import { checkLogin, GLOBAL_HAS_LOGIN, GLOBAL_HIDE_PAGE, ResJSON, VanComponent } from '../mixin'
+import { checkLogin, formatBytes, GLOBAL_HAS_LOGIN, GLOBAL_HIDE_PAGE, ResJSON, VanComponent } from '../mixin'
 import { deleteTask, fetchFileUrl, getActiveTask, getTaskList } from './data'
 import { TaskInDB, TaskStatus } from '../work/type'
 import { LoadingBox } from '../view'
@@ -73,7 +73,7 @@ export class TaskRoute implements VanComponent {
                                             if (task.statusState.val == 'error') return '下载失败'
                                             if (task.statusState.val == 'done') {
                                                 if (task.goneState.val) return '已下载到本机，服务器文件已清理'
-                                                return '文件在服务器上，点右侧 ↓ 下载到本机（传完后自动删除服务器文件）'
+                                                return `文件在服务器上${task.fileSize ? `（${formatBytes(task.fileSize)}）` : ''}，点右侧 ↓ 下载到本机（传完后自动删除服务器文件）`
                                             }
                                             if (task.videoProgress.val == 0) {
                                                 return `正在下载音频 (${(task.audioProgress.val * 100).toFixed(2)}%)`

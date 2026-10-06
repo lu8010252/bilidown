@@ -55,6 +55,15 @@ export interface VanComponent {
     element: HTMLElement
 }
 
+/** 把字节数显示成 KB / MB / GB，如 `56.3 MB` */
+export const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    const exp = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
+    const value = bytes / Math.pow(1024, exp)
+    return `${value >= 100 || exp === 0 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[exp]}`
+}
+
 export const formatSeconds = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)

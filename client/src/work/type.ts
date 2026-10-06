@@ -255,6 +255,8 @@ export type TaskInDB = TaskInitData & {
     status: TaskStatus
     /** 任务已完成但服务器上的文件已不存在（已下载到本机并清理） */
     fileGone?: boolean
+    /** 文件仍在服务器上时的真实大小（字节） */
+    fileSize?: number
 }
 
 export type TaskStatus = 'done' | 'waiting' | 'running' | 'error'

@@ -106,8 +106,10 @@ func getTaskList(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range tasks {
 		if tasks[i].Status == "done" {
-			if _, err := os.Stat(tasks[i].FilePath()); err != nil {
+			if info, err := os.Stat(tasks[i].FilePath()); err != nil {
 				tasks[i].FileGone = true
+			} else {
+				tasks[i].FileSize = info.Size()
 			}
 		}
 	}

@@ -1,5 +1,5 @@
 import van, { State } from 'vanjs-core'
-import { VanComponent, formatSeconds } from '../../mixin'
+import { VanComponent, formatBytes, formatSeconds } from '../../mixin'
 import { PageInParseResult, PlayInfo, VideoFormat } from '../type'
 import { WorkRoute } from '..'
 import { createTask, getPlayInfo } from '../data'
@@ -161,6 +161,44 @@ export class ParseModalComp implements VanComponent {
         await queue.onIdle()
     }
 
+    /**
+     * 估算所选清晰度/编码/音频下，视频流和音频流各自的大小（字节）。
+     * B 站只给出码率（bit/s），所以大小 ≈ 码率 ÷ 8 × 时长，是估算值，实际会有 ±10% 左右的出入。
+     */
+    partBytes(info: ParseModalComp['allPlayInfo']['val'][number]): { video: number, audio: number } {
+        const playInfo = info.info
+        if (!playInfo) return { video: 0, audio: 0 }
+        const seconds = playInfo.dash.duration
+        const toBytes = (bandwidth?: number) => bandwidth ? Math.round(bandwidth / 8 * seconds) : 0
+        let video = 0
+        try {
+            video = toBytes(pickVideoMedia(playInfo, playInfo.accept_quality[info.formatIndex.val], this.preferredCodec.val).bandwidth)
+        } catch { /* 没有匹配的视频流时不显示 */ }
+        const audio = toBytes(pickAudioMedia(playInfo, this.preferHiResAudio.val)?.bandwidth)
+        return { video, audio }
+    }
+
+    /** 按当前下载类型（合并 / 仅音频 / 仅视频）得到这一项会下载的估算大小 */
+    rowBytes(info: ParseModalComp['allPlayInfo']['val'][number]): number {
+        const { video, audio } = this.partBytes(info)
+        if (this.downloadType.val === 'audio') return audio
+        if (this.downloadType.val === 'video') return video
+        return video + audio
+    }
+
+    sizeLabel(info: ParseModalComp['allPlayInfo']['val'][number]): string {
+        const total = this.rowBytes(info)
+        return total > 0 ? `约 ${formatBytes(total)}` : ''
+    }
+
+    sizeDetail(info: ParseModalComp['allPlayInfo']['val'][number]): string {
+        const { video, audio } = this.partBytes(info)
+        const detail = this.downloadType.val === 'audio' ? `音频 ${formatBytes(audio)}`
+            : this.downloadType.val === 'video' ? `视频 ${formatBytes(video)}`
+                : `视频 ${formatBytes(video)} + 音频 ${formatBytes(audio)}`
+        return `${detail}（按码率估算，实际略有出入）`
+    }
+
     /** 视频发布者（多人合作时取第一位） */
     private ownerName() {
         const data = this.option.workRoute.videoInfoCardData.val
@@ -277,6 +315,10 @@ export class ParseModalComp implements VanComponent {
                                         info.page.badge) : ''
                                 ),
                             ),
+                            div({
+                                class: 'small text-secondary text-nowrap',
+                                title: () => this.sizeDetail(info),
+                            }, () => this.sizeLabel(info)),
                             div({ class: 'dropdown' },
                                 div({ class: 'dropdown-toggle py-2 text-primary', 'data-bs-toggle': 'dropdown' },
                                     () => videoFormatMap[info.info!.accept_quality[info.formatIndex.val]]
@@ -350,11 +392,15 @@ export class ParseModalComp implements VanComponent {
         const allSelected = van.derive(() => selectedCount.val == totalCount.val)
         /** 是否全部解析完成 */
         const allFinish = van.derive(() => this.totalCount.val == this.finishCount.val)
+        /** 已选项的估算总大小 */
+        const selectedBytes = van.derive(() => this.allPlayInfo.val
+            .filter(info => info.selected.val && info.info)
+            .reduce((sum, info) => sum + _that.rowBytes(info), 0))
 
         return div({ class: `modal-footer` },
             div({ class: 'me-auto', hidden: () => !allFinish.val || totalCount.val == 0 },
                 div({ class: 'hstack gap-3 text-nowrap' },
-                    () => `已选择 (${selectedCount.val}/${totalCount.val}) 项`,
+                    () => `已选择 (${selectedCount.val}/${totalCount.val}) 项` + (selectedBytes.val > 0 ? `，约 ${formatBytes(selectedBytes.val)}` : ''),
                     select({
                         class: 'form-select form-select-sm',
                         value: _that.downloadType,
@@ -414,27 +460,32 @@ export class ParseModalComp implements VanComponent {
     }
 }
 
-const getAudioURL = (playInfo: PlayInfo, preferHiRes: boolean = true): string => {
-    if (preferHiRes && playInfo.dash.flac) {
-        return playInfo.dash.flac.audio.baseUrl
-    } else {
-        return playInfo.dash.audio.sort((a, b) => b.id - a.id)[0].baseUrl
-    }
+/** 选出要下载的音频流：优先 Hi-Res（flac），否则取音质最高的一条 */
+const pickAudioMedia = (playInfo: PlayInfo, preferHiRes: boolean = true) => {
+    if (preferHiRes && playInfo.dash.flac) return playInfo.dash.flac.audio
+    return [...playInfo.dash.audio].sort((a, b) => b.id - a.id)[0]
 }
 
-const getActiveFormatVideo = (playInfo: PlayInfo, format: VideoFormat, preferredCodec: 12 | 7 | 13 = 12): { video: string, width: number, height: number } => {
-    // 优先级顺序：用户首选编码格式，然后按默认优先级 12 > 7 > 13
+const getAudioURL = (playInfo: PlayInfo, preferHiRes: boolean = true): string => {
+    return pickAudioMedia(playInfo, preferHiRes).baseUrl
+}
+
+/** 选出要下载的视频流：先按清晰度，再按首选编码 > 默认优先级 12 > 7 > 13 */
+const pickVideoMedia = (playInfo: PlayInfo, format: VideoFormat, preferredCodec: 12 | 7 | 13 = 12) => {
     const codecOrder = [preferredCodec, 12, 7, 13].filter((value, index, self) => self.indexOf(value) === index)
     for (const code of codecOrder) {
         for (const item of playInfo.dash.video) {
-            if (item.id == format && item.codecid == code) {
-                return {
-                    video: item.baseUrl,
-                    width: item.width,
-                    height: item.height
-                }
-            }
+            if (item.id == format && item.codecid == code) return item
         }
     }
     throw new Error('未找到对应视频分辨率格式')
+}
+
+const getActiveFormatVideo = (playInfo: PlayInfo, format: VideoFormat, preferredCodec: 12 | 7 | 13 = 12): { video: string, width: number, height: number } => {
+    const item = pickVideoMedia(playInfo, format, preferredCodec)
+    return {
+        video: item.baseUrl,
+        width: item.width,
+        height: item.height
+    }
 }
