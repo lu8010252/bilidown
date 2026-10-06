@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"unicode/utf8"
 
 	"bilidown/common"
 )
@@ -48,6 +49,18 @@ func IsValidFormatCode(format common.MediaFormat) bool {
 // FilterFileName 过滤字符串中的特殊字符，使其允许作为文件名。
 func FilterFileName(fileName string) string {
 	return regexp.MustCompile(`[\\/:*?"<>|\n]`).ReplaceAllString(fileName, "")
+}
+
+// TruncateBytes 把字符串截断到不超过 max 字节，且不会切断一个汉字（UTF-8 字符）。
+func TruncateBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // GetFFmpegPath 获取可用的 FFmpeg 执行路径。

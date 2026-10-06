@@ -5,7 +5,7 @@ import { WorkRoute } from '..'
 import { createTask, getPlayInfo } from '../data'
 import PQueue from 'p-queue'
 
-const { a, button, div, input, select, option, label } = van.tags
+const { a, button, div, input, select, option, label, span } = van.tags
 
 type Option = {
     workRoute: WorkRoute
@@ -30,6 +30,32 @@ const codecMap: Record<12 | 7 | 13, string> = {
     12: "HEVC (hev1)",
     7: "AVC (avc1)",
     13: "AV1 (av01)",
+}
+
+/** 文件命名方式：parse 解析时的名称；full 完整信息；custom 自定义模板 */
+type NamingMode = 'parse' | 'full' | 'custom'
+
+const NAMING_KEY = 'bilidown.naming'
+const DEFAULT_TEMPLATE = '{序号}. {分集名}'
+/** 自定义模板里可用的占位符 */
+const PLACEHOLDERS = ['序号', '分集名', '视频标题', 'UP主', '清晰度', '时长', 'BV号'] as const
+
+const loadNaming = (): { mode: NamingMode, template: string } => {
+    try {
+        const data = JSON.parse(localStorage.getItem(NAMING_KEY) || '{}')
+        return {
+            mode: ['parse', 'full', 'custom'].includes(data.mode) ? data.mode : 'parse',
+            template: typeof data.template === 'string' && data.template ? data.template : DEFAULT_TEMPLATE,
+        }
+    } catch {
+        return { mode: 'parse', template: DEFAULT_TEMPLATE }
+    }
+}
+
+const saveNaming = (mode: NamingMode, template: string) => {
+    try {
+        localStorage.setItem(NAMING_KEY, JSON.stringify({ mode, template }))
+    } catch { /* 存储不可用时，本次会话内仍然生效 */ }
 }
 
 export class ParseModalComp implements VanComponent {
@@ -62,7 +88,13 @@ export class ParseModalComp implements VanComponent {
 
     errorList: State<string[]> = van.state([])
 
+    /** 文件命名方式，选择会记在本浏览器里 */
+    namingMode = van.state<NamingMode>(loadNaming().mode)
+    /** 自定义命名模板，如 `{序号}. {分集名} [{清晰度}]` */
+    namingTemplate = van.state(loadNaming().template)
+
     constructor(public option: Option) {
+        van.derive(() => saveNaming(this.namingMode.val, this.namingTemplate.val))
         this.totalCount = van.derive(() => option.workRoute.selectedPages.val.length)
         const allFinish = van.derive(() => this.totalCount.val == this.finishCount.val)
         this.element = div({ class: `modal fade`, tabIndex: -1 },
@@ -129,41 +161,70 @@ export class ParseModalComp implements VanComponent {
         await queue.onIdle()
     }
 
+    /** 视频发布者（多人合作时取第一位） */
+    private ownerName() {
+        const data = this.option.workRoute.videoInfoCardData.val
+        return data.staff.length > 0 ? data.staff[0].split('[')[0].trim() : data.owner.name.trim()
+    }
+
+    /** 按当前选择的命名方式生成文件名（不含扩展名） */
+    makeTitle(info: ParseModalComp['allPlayInfo']['val'][number]): string {
+        const clean = (text: string) => text.replace(/\s+/g, ' ').trim()
+        const workRoute = this.option.workRoute
+        const data = workRoute.videoInfoCardData.val
+        const cardTitle = data.title.trim()
+        const badge = info.page.badge.trim()
+        const part = info.page.part.trim()
+        const badgeIsNum = /^\d+$/.test(badge)
+        const formatName = videoFormatMap[info.info!.accept_quality[info.formatIndex.val]]
+        const duration = formatSeconds(info.info!.dash.duration)
+
+        // 与解析列表里每一行显示的名字一致：数字序号 + “. ” + 分集名
+        const parseName = clean((badgeIsNum && badge ? `${badge}. ` : '') + (part || cardTitle))
+
+        if (this.namingMode.val === 'parse') return parseName || cardTitle
+
+        if (this.namingMode.val === 'custom') {
+            const values: Record<typeof PLACEHOLDERS[number], string> = {
+                '序号': badge, '分集名': part, '视频标题': cardTitle, 'UP主': this.ownerName(),
+                '清晰度': formatName, '时长': duration, 'BV号': info.page.bvid,
+            }
+            const name = clean(this.namingTemplate.val.replace(
+                /\{(序号|分集名|视频标题|UP主|清晰度|时长|BV号)\}/g,
+                (_, key: typeof PLACEHOLDERS[number]) => values[key]
+            ))
+            return name || parseName || cardTitle
+        }
+
+        // full：原版的完整格式（合集名、序号、UP 主、清晰度、时长都带上）
+        const isVideoMode = workRoute.videoInfoCardMode.val == 'video'
+        const pagesLength = data.pages.length
+        return (!badgeIsNum
+            ? [part, `[${badge}]`, `[${cardTitle}]`, `[${formatName}]`, `[${duration}]`]
+            : [
+                pagesLength == 1 ? workRoute.allSection.val[workRoute.sectionTabsActiveIndex.val].title : `[${cardTitle}]`,
+                workRoute.sectionPages.val.length == 1 ? '' : `[${badge}]`,
+                part,
+                isVideoMode ? `[${this.ownerName()}]` : '',
+                `[${formatName}]`,
+                `[${duration}]`,
+            ]).filter(p => p).join(' ')
+    }
+
     download() {
         const selectedPlayInfos = this.allPlayInfo.val.filter(info => info.selected.val)
         const workRoute = this.option.workRoute
         this.downloadBtnDisabled.val = true
         // 需要传递给服务器，需要创建下载任务的数据列表
         createTask(selectedPlayInfos.map(info => {
-            const badgeNotNum = !info.page.badge.match(/^\d+$/)
-            const isVideoMode = workRoute.videoInfoCardMode.val == 'video'
-            const cardTitle = workRoute.videoInfoCardData.val.title
-            const owner = workRoute.videoInfoCardData.val.staff.length > 0
-                ? workRoute.videoInfoCardData.val.staff[0].split("[")[0].trim()
-                : workRoute.videoInfoCardData.val.owner.name.trim()
+            const owner = this.ownerName()
             const activeVideoInfo = getActiveFormatVideo(info.info!, info.info!.accept_quality[info.formatIndex.val], this.preferredCodec.val)
-            const pagesLength = workRoute.videoInfoCardData.val.pages.length
 
             return ({
                 bvid: info.page.bvid,
                 cid: info.page.cid,
                 cover: workRoute.videoInfoCardData.val.cover,
-                title: (badgeNotNum
-                    ? [
-                        info.page.part.trim(),
-                        `[${info.page.badge.trim()}]`,
-                        `[${cardTitle.trim()}]`,
-                        `[${videoFormatMap[info.info!.accept_quality[info.formatIndex.val]]}]`,
-                        `[${formatSeconds(info.info!.dash.duration)}]`
-                    ]
-                    : [
-                        pagesLength == 1 ? workRoute.allSection.val[workRoute.sectionTabsActiveIndex.val].title : `[${cardTitle.trim()}]`,
-                        workRoute.sectionPages.val.length == 1 ? '' : `[${info.page.badge.trim()}]`,
-                        info.page.part.trim(),
-                        isVideoMode ? `[${owner}]` : '',
-                        `[${videoFormatMap[info.info!.accept_quality[info.formatIndex.val]]}]`,
-                        `[${formatSeconds(info.info!.dash.duration)}]`
-                    ]).filter(p => p).join(' '),
+                title: this.makeTitle(info),
                 format: info.info!.accept_quality[info.formatIndex.val],
                 owner,
                 audio: getAudioURL(info.info!, this.preferHiResAudio.val),
@@ -239,6 +300,47 @@ export class ParseModalComp implements VanComponent {
         )
     }
 
+    /** “文件命名”控件：预设 + 自定义模板 + 第一项的预览 */
+    NamingControls() {
+        const _that = this
+        const preview = van.derive(() => {
+            const first = _that.allPlayInfo.val.find(info => info.selected.val && info.info)
+            return first ? _that.makeTitle(first) : ''
+        })
+
+        return div({ class: 'vstack gap-2 mt-2' },
+            div({ class: 'hstack gap-2 flex-wrap' },
+                span({ class: 'text-nowrap' }, '文件命名'),
+                select({
+                    class: 'form-select form-select-sm w-auto',
+                    value: _that.namingMode,
+                    oninput: (e) => _that.namingMode.val = (e.target as HTMLSelectElement).value as NamingMode
+                },
+                    option({ value: 'parse' }, '解析时的名称（默认）'),
+                    option({ value: 'full' }, '完整信息（合集、UP主、清晰度、时长）'),
+                    option({ value: 'custom' }, '自定义…')
+                ),
+            ),
+            () => _that.namingMode.val == 'custom' ? div({ class: 'vstack gap-2' },
+                input({
+                    class: 'form-control form-control-sm',
+                    placeholder: '例如：{序号}. {分集名} [{清晰度}]；只下载一个视频时，也可以直接输入想要的名字',
+                    value: _that.namingTemplate,
+                    oninput: (e) => _that.namingTemplate.val = (e.target as HTMLInputElement).value
+                }),
+                div({ class: 'hstack gap-1 flex-wrap' },
+                    span({ class: 'small text-secondary text-nowrap' }, '点击插入：'),
+                    PLACEHOLDERS.map(name => button({
+                        type: 'button', class: 'btn btn-sm btn-outline-secondary py-0',
+                        onclick: () => _that.namingTemplate.val += `{${name}}`
+                    }, name))
+                )
+            ) : '',
+            div({ class: 'small text-secondary text-break text-wrap', hidden: () => !preview.val },
+                () => `示例：${preview.val}`)
+        )
+    }
+
     ModalFooter() {
         const _that = this
 
@@ -281,7 +383,8 @@ export class ParseModalComp implements VanComponent {
                         }),
                         label({ class: 'form-check-label', for: 'preferHiResAudio' }, 'Hi-Res')
                     )
-                )
+                ),
+                _that.NamingControls(),
             ),
             button({
                 class: `btn btn-secondary`,
