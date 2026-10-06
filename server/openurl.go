@@ -4,12 +4,10 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
-	"time"
 )
 
-// openBrowser 用系统默认浏览器打开页面（仅本机模式使用）。
+// openBrowser 用系统默认浏览器打开页面。
 func openBrowser(url string) {
-	time.Sleep(600 * time.Millisecond) // 等 HTTP 服务开始监听
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":

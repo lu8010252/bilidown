@@ -258,6 +258,7 @@ func (task *Task) MergeMedia(outputPath string, inputPaths ...string) error {
 	}
 
 	cmd := exec.Command(ffmpegPath, append(inputs, "-c:v", "copy", "-c:a", "copy", "-progress", "pipe:1", "-strict", "-2", outputPath)...)
+	util.HideWindow(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -722,6 +723,7 @@ func (task *Task) addMetadata(filePath string) error {
 		tempPath,
 	)
 
+	util.HideWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg添加元数据失败: %v, 输出: %s", err, string(output))

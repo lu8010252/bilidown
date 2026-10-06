@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # 只用来在有 Docker 的机器上交叉编译 Windows 版（不含 ffmpeg）：
 #   docker build -f Dockerfile.windows --output dist-windows .
-# 产物：dist-windows/bilidown.exe、static/、README.txt
+# 产物：dist-windows/bilidown.exe（页面和托盘图标已打包进 exe）、README.txt
 
 FROM node:22-alpine AS web
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -17,9 +17,9 @@ ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY} CGO_ENABLED=0 GOOS=windows GOARCH=amd64
 WORKDIR /src/server
 COPY server/ ./
-RUN go mod tidy && go build -trimpath -ldflags="-s -w" -o /out/bilidown.exe .
+COPY --from=web /src/server/static ./static
+RUN go mod tidy && go build -trimpath -ldflags="-s -w -H=windowsgui" -o /out/bilidown.exe .
 
 FROM scratch AS out
 COPY --from=server /out/bilidown.exe /bilidown.exe
-COPY --from=web /src/server/static /static
 COPY windows/README.txt /README.txt

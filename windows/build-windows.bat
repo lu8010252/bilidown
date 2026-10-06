@@ -18,11 +18,10 @@ popd
 echo [2/3] 构建后端...
 pushd server
 go mod tidy || goto :fail
-go build -trimpath -ldflags="-s -w" -o ..\dist-windows\bilidown.exe . || goto :fail
+go build -trimpath -ldflags="-s -w -H=windowsgui" -o ..\dist-windows\bilidown.exe . || goto :fail
 popd
 
 echo [3/3] 整理文件...
-xcopy /E /I /Y server\static dist-windows\static >nul
 copy /Y windows\README.txt dist-windows\README.txt >nul
 echo.
 echo 完成：dist-windows\bilidown.exe

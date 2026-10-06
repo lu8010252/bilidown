@@ -64,19 +64,26 @@ func TruncateBytes(s string, max int) string {
 	return s[:cut]
 }
 
+// probeFFmpeg 试运行 `path -version`，能运行说明可用
+func probeFFmpeg(path string) bool {
+	cmd := exec.Command(path, "-version")
+	HideWindow(cmd)
+	return cmd.Run() == nil
+}
+
 // GetFFmpegPath 获取可用的 FFmpeg 执行路径。
 func GetFFmpegPath() (string, error) {
-	if err := exec.Command("ffmpeg", "-version").Run(); err == nil {
+	if probeFFmpeg("ffmpeg") {
 		return "ffmpeg", nil
 	}
-	if err := exec.Command("bin/ffmpeg", "-version").Run(); err == nil {
+	if probeFFmpeg("bin/ffmpeg") {
 		return "bin/ffmpeg", nil
 	}
 	// 程序所在目录下的 ffmpeg / bin/ffmpeg（Windows 上 Go 会自动补 .exe）
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		for _, c := range []string{filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "bin", "ffmpeg")} {
-			if err := exec.Command(c, "-version").Run(); err == nil {
+			if probeFFmpeg(c) {
 				return c, nil
 			}
 		}
