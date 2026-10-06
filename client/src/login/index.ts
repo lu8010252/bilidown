@@ -63,7 +63,7 @@ export default () => {
                     qrKey = qrInfo.key
                 } catch (error) {
                     // 加载二维码时失败
-                    errorMessage.val = `加载二维码失败，请刷新页面重试`
+                    errorMessage.val = `加载二维码失败：${error instanceof Error ? error.message : error}（请刷新页面重试）`
                     clearTimeout(timer)
                     clearTimeout(statusTimer)
                 }
@@ -84,7 +84,7 @@ export default () => {
                     }
                 } catch (error) {
                     // 出错了，显示错误信息
-                    errorMessage.val = `获取二维码状态失败，请刷新页面重试`
+                    errorMessage.val = `获取二维码状态失败：${error instanceof Error ? error.message : error}（请刷新页面重试）`
                     clearTimeout(statusTimer)
                     clearTimeout(timer)
                 }
