@@ -18,13 +18,6 @@ export const getActiveTask = async (): Promise<ActiveTask[] | null> => {
     }
 }
 
-/** 不会中止其他轮询的版本（取回管理器专用） */
-export const getActiveTaskQuiet = async (): Promise<ActiveTask[]> => {
-    const res = await fetch('/api/getActiveTask').then(res => res.json()) as ResJSON<ActiveTask[]>
-    if (!res.success) throw new Error(res.message)
-    return res.data
-}
-
 let getTaskListController: AbortController | undefined
 
 export const getTaskList = async (page: number, pageSize: number): Promise<TaskInDB[] | null> => {
@@ -42,13 +35,6 @@ export const getTaskList = async (page: number, pageSize: number): Promise<TaskI
     }
 }
 
-/** 不与页面上其他请求互相取消的任务列表查询（取回管理器专用） */
-export const getTaskListQuiet = async (): Promise<TaskInDB[]> => {
-    const res = await fetch('/api/getTaskList?page=0&pageSize=360').then(res => res.json()) as ResJSON<TaskInDB[]>
-    if (!res.success) throw new Error(res.message)
-    return res.data
-}
-
 const post = async (action: string, id: number) => {
     const res = await fetch(`/api/${action}?id=${id}`).then(res => res.json()) as ResJSON
     if (!res.success) throw new Error(res.message)
@@ -59,9 +45,6 @@ export const resumeTask = (id: number) => post('resumeTask', id)
 export const cancelTask = (id: number) => post('cancelTask', id)
 /** 本机模式：在资源管理器中定位文件 */
 export const showFile = (id: number) => post('showFile', id)
-
-/** 已完成任务的“下载到本机”地址：浏览器完整收到文件后，服务器会删除该文件 */
-export const fetchFileUrl = (id: number) => `/api/fetchFile?id=${id}`
 
 /** 用于刷新任务实时进度 */
 export type ActiveTask = {

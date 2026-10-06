@@ -1,8 +1,0 @@
-.git
-client/node_modules
-client/dist
-server/static
-server/download
-*.db
-data
-download

@@ -257,8 +257,6 @@ export type TaskInDB = TaskInitData & {
     fileGone?: boolean
     /** 文件仍在服务器上时的真实大小（字节） */
     fileSize?: number
-    /** 文件正在被“下载到本机” */
-    fetching?: boolean
 }
 
 export type TaskStatus = 'done' | 'waiting' | 'running' | 'error'

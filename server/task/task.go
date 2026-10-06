@@ -44,12 +44,10 @@ type TaskInDB struct {
 	TaskInitOption
 	ID       int64     `json:"id"`
 	CreateAt time.Time `json:"createAt"`
-	// FileGone 表示任务已完成但服务器上的文件已不存在（例如已“下载到本机”并清理），仅在返回任务列表时计算。
+	// FileGone 表示任务已完成但文件已不存在（例如被手动删除），仅在返回任务列表时计算。
 	FileGone bool `json:"fileGone"`
-	// FileSize 文件仍在服务器上时的真实大小（字节），仅在返回任务列表时计算。
+	// FileSize 文件的真实大小（字节），仅在返回任务列表时计算。
 	FileSize int64 `json:"fileSize"`
-	// Fetching 表示该文件正在被“下载到本机”，仅在返回任务列表时计算。
-	Fetching bool `json:"fetching"`
 }
 
 func (task *TaskInDB) FilePath() string {

@@ -4,16 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"mime"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"sync"
 
 	"bilidown/task"
 	"bilidown/util"
@@ -81,39 +77,6 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 		go _task.Start()
 	}
 	util.Res{Success: true, Message: "创建成功"}.Write(w)
-}
-
-// fetching 记录正在被“下载到本机”的任务，避免同一文件被两个浏览器标签/批量队列同时取回。
-var (
-	fetching   = map[int64]bool{}
-	fetchingMu sync.Mutex
-)
-
-func claimFetch(id int64) bool {
-	fetchingMu.Lock()
-	defer fetchingMu.Unlock()
-	if fetching[id] {
-		return false
-	}
-	fetching[id] = true
-	return true
-}
-
-func releaseFetch(id int64) {
-	fetchingMu.Lock()
-	delete(fetching, id)
-	fetchingMu.Unlock()
-}
-
-func isFetching(id int64) bool {
-	fetchingMu.Lock()
-	defer fetchingMu.Unlock()
-	return fetching[id]
-}
-
-// getMode 告诉前端当前是服务器模式还是本机模式
-func getMode(w http.ResponseWriter, r *http.Request) {
-	util.Res{Success: true, Data: map[string]any{"local": util.LocalMode()}}.Write(w)
 }
 
 // activeTaskFromRequest 按 id 参数找到内存中的任务（暂停/继续/取消用）
@@ -213,7 +176,6 @@ func getTaskList(w http.ResponseWriter, r *http.Request) {
 			} else {
 				tasks[i].FileSize = info.Size()
 			}
-			tasks[i].Fetching = isFetching(tasks[i].ID)
 		}
 	}
 	util.Res{Success: true, Message: "获取成功", Data: tasks}.Write(w)
@@ -247,52 +209,6 @@ func lookupDoneTask(w http.ResponseWriter, r *http.Request) (*task.TaskInDB, boo
 		return nil, false
 	}
 	return t, true
-}
-
-// fetchFile 把已完成任务的文件以附件形式传给浏览器，完整传输成功后删除服务器上的文件，
-// 让磁盘空间很小的设备只做临时中转。传输中断（浏览器取消、网络断开）时文件会保留，可重新下载。
-func fetchFile(w http.ResponseWriter, r *http.Request) {
-	t, ok := lookupDoneTask(w, r)
-	if !ok {
-		return
-	}
-	if !claimFetch(t.ID) {
-		http.Error(w, "该文件正在被取回", http.StatusConflict)
-		return
-	}
-	defer releaseFetch(t.ID)
-	path := t.FilePath()
-	f, err := os.Open(path)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	ext := ".mp4"
-	if t.DownloadType == "audio" {
-		ext = ".m4a"
-	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": t.Title + ext}))
-
-	// 不走 Range：整文件顺序发送，才能准确判断“是否完整传完”
-	n, err := io.Copy(w, f)
-	if err != nil || n != info.Size() {
-		log.Printf("fetchFile: task %d 传输未完成 (%d/%d bytes, err=%v)，保留服务器文件", t.ID, n, info.Size(), err)
-		return
-	}
-	if err := os.Remove(path); err != nil {
-		log.Printf("fetchFile: task %d 删除服务器文件失败: %v", t.ID, err)
-		return
-	}
-	log.Printf("fetchFile: task %d 已传输并清理 (%d bytes)", t.ID, n)
 }
 
 func deleteTask(w http.ResponseWriter, r *http.Request) {

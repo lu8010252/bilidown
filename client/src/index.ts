@@ -12,13 +12,11 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import './scss/index.scss'
 import './scss/appearance.scss'
 import { initAppearance } from './appearance'
-import { initFetchManager } from './fetch'
 
 const { div } = van.tags
 
 // 先应用主题和背景，避免页面先闪一下默认配色
 initAppearance()
-initFetchManager()
 
 redirect('home', 'work')
 

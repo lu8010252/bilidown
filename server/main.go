@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"fmt"
 	"log"
@@ -19,15 +18,13 @@ import (
 
 const (
 	DEFAULT_PORT = 8098              // 默认 HTTP 端口，可用环境变量 BILIDOWN_PORT 覆盖
-	VERSION      = "v2.1.1-headless" // 无托盘、无头运行的分支版本
+	VERSION      = "v2.1.1-windows"  // Windows 本机版
 )
 
 func main() {
-	if util.LocalMode() {
-		// 双击运行时以程序所在目录为工作目录，data.db、static、downloads 都放在这里
-		if exe, err := os.Executable(); err == nil {
-			_ = os.Chdir(filepath.Dir(exe))
-		}
+	// 以程序所在目录为工作目录，data.db、static、download 都放在这里（双击运行时 cwd 不一定是程序目录）
+	if exe, err := os.Executable(); err == nil {
+		_ = os.Chdir(filepath.Dir(exe))
 	}
 	checkFFmpeg()
 	// 初始化数据表
@@ -54,33 +51,10 @@ func listenAddr() string {
 		port = p
 	}
 	host := os.Getenv("BILIDOWN_HOST")
-	if host == "" && util.LocalMode() {
-		host = "127.0.0.1" // 本机版默认不对局域网开放
+	if host == "" {
+		host = "127.0.0.1" // 默认只允许本机访问
 	}
 	return fmt.Sprintf("%s:%d", host, port)
-}
-
-// withAuth 在设置了环境变量 BILIDOWN_AUTH=用户名:密码 时启用 HTTP Basic 认证，未设置则不做任何限制。
-func withAuth(next http.Handler) http.Handler {
-	cred := os.Getenv("BILIDOWN_AUTH")
-	if cred == "" {
-		return next
-	}
-	user, pass, ok := strings.Cut(cred, ":")
-	if !ok || user == "" {
-		log.Fatalln("BILIDOWN_AUTH 格式应为 用户名:密码")
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, p, has := r.BasicAuth()
-		okUser := subtle.ConstantTimeCompare([]byte(u), []byte(user)) == 1
-		okPass := subtle.ConstantTimeCompare([]byte(p), []byte(pass)) == 1
-		if !has || !okUser || !okPass {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Bilidown"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // 配置和启动 HTTP 服务器
@@ -93,11 +67,9 @@ func mustRunServer() {
 
 	addr := listenAddr()
 	log.Printf("Bilidown %s listening on %s", VERSION, addr)
-	if util.LocalMode() {
-		_, port, _ := strings.Cut(addr, ":")
-		go openBrowser("http://127.0.0.1:" + port)
-	}
-	if err := http.ListenAndServe(addr, withAuth(mux)); err != nil {
+	_, port, _ := strings.Cut(addr, ":")
+	go openBrowser("http://127.0.0.1:" + port)
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal("http.ListenAndServe:", err)
 	}
 }
