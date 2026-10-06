@@ -1,5 +1,4 @@
 import van from 'vanjs-core'
-import { ResJSON } from '../mixin'
 import { ActiveTask, fetchFileUrl, getActiveTaskQuiet, getTaskListQuiet } from '../task/data'
 
 /**
@@ -33,9 +32,6 @@ export const setAutoFetch = (on: boolean) => {
         localStorage.setItem(AUTO_KEY, on ? '1' : '0')
     } catch { /* 隐私模式下仍在本次会话内生效 */ }
 }
-
-/** 本机模式（程序就运行在你自己的电脑上）：不需要取回，文件已经在本机 */
-export const localMode = van.state(false)
 
 export const fetchStates = van.state<Record<number, FetchState>>({})
 
@@ -116,7 +112,6 @@ const lastStatus = new Map<number, string>()
 let firstPoll = true
 
 const watchActive = async () => {
-    if (localMode.val) return
     let list: ActiveTask[]
     try {
         list = await getActiveTaskQuiet()
@@ -135,11 +130,7 @@ const watchActive = async () => {
 }
 
 /** 应用启动时调用一次 */
-export const initFetchManager = async () => {
-    try {
-        const res = await fetch('/api/getMode').then(res => res.json()) as ResJSON<{ local: boolean }>
-        localMode.val = !!res.data?.local
-    } catch { /* 取不到就按服务器模式处理 */ }
+export const initFetchManager = () => {
     watchActive()
     setInterval(watchActive, 3000)
 }

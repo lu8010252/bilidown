@@ -21,15 +21,6 @@ COPY server/ ./
 COPY --from=web /src/server/static ./static
 RUN go mod tidy && go build -trimpath -ldflags="-s -w" -o /out/bilidown .
 
-# ---------- 2b. Windows 版（可选）：docker build --target windows-out --output dist-windows . ----------
-FROM server AS server-win
-RUN GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bilidown.exe .
-
-FROM scratch AS windows-out
-COPY --from=server-win /out/bilidown.exe /bilidown.exe
-COPY --from=server-win /src/server/static /static
-COPY windows/README.txt /README.txt
-
 # ---------- 3. 运行镜像 ----------
 FROM alpine:3.20
 RUN apk add --no-cache ffmpeg ca-certificates tzdata

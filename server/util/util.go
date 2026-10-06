@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -71,15 +70,6 @@ func GetFFmpegPath() (string, error) {
 	}
 	if err := exec.Command("bin/ffmpeg", "-version").Run(); err == nil {
 		return "bin/ffmpeg", nil
-	}
-	// 程序所在目录下的 ffmpeg / bin/ffmpeg（Windows 上 Go 会自动补 .exe）
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		for _, c := range []string{filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "bin", "ffmpeg")} {
-			if err := exec.Command(c, "-version").Run(); err == nil {
-				return c, nil
-			}
-		}
 	}
 	return "", errors.New("ffmpeg not found")
 }

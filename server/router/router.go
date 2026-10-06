@@ -21,16 +21,10 @@ func API() *http.ServeMux {
 	router.HandleFunc("/createTask", createTask)
 	router.HandleFunc("/getActiveTask", getActiveTask)
 	router.HandleFunc("/getTaskList", getTaskList)
-	// /showFile 会在服务器上调用 explorer/open/xdg-open，无头部署下既无意义又有风险，因此不再注册。
 	router.HandleFunc("/fetchFile", fetchFile)
 	router.HandleFunc("/pauseTask", pauseTask)
 	router.HandleFunc("/resumeTask", resumeTask)
 	router.HandleFunc("/cancelTask", cancelTask)
-	router.HandleFunc("/getMode", getMode)
-	if util.LocalMode() {
-		// 只有本机版才会在“服务器所在的电脑”上打开资源管理器，这时服务器就是你自己的电脑
-		router.HandleFunc("/showFile", showFile)
-	}
 	router.HandleFunc("/getFields", getFields)
 	router.HandleFunc("/saveFields", saveFields)
 	router.HandleFunc("/logout", logout)

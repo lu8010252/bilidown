@@ -9,9 +9,6 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 
@@ -111,11 +108,6 @@ func isFetching(id int64) bool {
 	return fetching[id]
 }
 
-// getMode 告诉前端当前是服务器模式还是本机模式
-func getMode(w http.ResponseWriter, r *http.Request) {
-	util.Res{Success: true, Data: map[string]any{"local": util.LocalMode()}}.Write(w)
-}
-
 // activeTaskFromRequest 按 id 参数找到内存中的任务（暂停/继续/取消用）
 func activeTaskFromRequest(w http.ResponseWriter, r *http.Request) (*task.Task, bool) {
 	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
@@ -159,26 +151,6 @@ func cancelTask(w http.ResponseWriter, r *http.Request) {
 		}
 		util.Res{Success: true, Message: "已取消"}.Write(w)
 	}
-}
-
-// showFile 仅本机模式注册：在资源管理器/访达中定位已完成任务的文件
-func showFile(w http.ResponseWriter, r *http.Request) {
-	t, ok := lookupDoneTask(w, r)
-	if !ok {
-		return
-	}
-	path := t.FilePath()
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("explorer", "/select,"+path)
-	case "darwin":
-		cmd = exec.Command("open", "-R", path)
-	default:
-		cmd = exec.Command("xdg-open", filepath.Dir(path))
-	}
-	_ = cmd.Start() // explorer 即使成功也常返回非 0，只管启动
-	util.Res{Success: true, Message: "已打开"}.Write(w)
 }
 
 func getActiveTask(w http.ResponseWriter, r *http.Request) {

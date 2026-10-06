@@ -1,10 +1,10 @@
 import van, { State } from 'vanjs-core'
 import { Route, goto, now } from 'vanjs-router'
 import { checkLogin, formatBytes, GLOBAL_HAS_LOGIN, VanComponent } from '../mixin'
-import { cancelTask, deleteTask, getActiveTask, getTaskList, pauseTask, resumeTask, showFile } from './data'
+import { cancelTask, deleteTask, getActiveTask, getTaskList, pauseTask, resumeTask } from './data'
 import { TaskInDB, TaskStatus } from '../work/type'
 import { LoadingBox } from '../view'
-import { autoFetch, enqueueFetch, fetchStates, localMode, setAutoFetch } from '../fetch'
+import { autoFetch, enqueueFetch, fetchStates, setAutoFetch } from '../fetch'
 
 const { button, div, input, label, span } = van.tags
 
@@ -64,7 +64,6 @@ export class TaskRoute implements VanComponent {
         const selectedFetchable = () => fetchable().filter(task => _that.selected.val.includes(task.id))
         return div({
             class: 'app-panel p-2 px-3 hstack gap-3 flex-wrap',
-            hidden: () => localMode.val,
         },
             div({ class: 'form-check form-switch mb-0' },
                 input({
@@ -114,7 +113,6 @@ export class TaskRoute implements VanComponent {
             if (status === 'waiting') return task.paused.val ? '已暂停（排队中）' : '等待下载'
             if (status === 'error') return '下载失败'
             if (status === 'done') {
-                if (localMode.val) return `已保存到 ${task.folder}`
                 if (_that.isGone(task)) return '已取回到本机，服务器文件已清理'
                 const state = fetchStates.val[task.id]
                 if (state?.kind === 'queued') return '排队等待取回…'
@@ -146,7 +144,7 @@ export class TaskRoute implements VanComponent {
             class: 'list-group-item p-0 hstack user-select-none',
             hidden: task.deleting,
         },
-            div({ class: 'ps-3', hidden: () => localMode.val || !_that.isFetchable(task) },
+            div({ class: 'ps-3', hidden: () => !_that.isFetchable(task) },
                 input({
                     class: 'form-check-input', type: 'checkbox', title: '选择，用于批量取回',
                     checked: () => _that.selected.val.includes(task.id),
@@ -210,19 +208,11 @@ export class TaskRoute implements VanComponent {
                 }).catch(error => alert(error.message))
             }),
 
-            // 服务器模式：取回到本机
+            // 取回到本机
             iconBtn('取回到本机（传完后删除服务器文件）',
-                () => localMode.val || !_that.isFetchable(task) || task.deleting.val,
+                () => !_that.isFetchable(task) || task.deleting.val,
                 _that.DownloadSVG(),
                 () => enqueueFetch([task.id])),
-            // 本机模式：在资源管理器中定位
-            div({
-                class: 'me-3', hidden: () => !localMode.val || task.statusState.val != 'done' || task.goneState.val,
-            }, button({
-                class: 'btn btn-sm btn-outline-secondary text-nowrap',
-                onclick: () => showFile(task.id).catch(error => alert(error.message)),
-            }, '打开位置')),
-
             iconBtn('删除视频',
                 () => task.statusState.val != 'done' && task.statusState.val != 'error'
                     || fetchStates.val[task.id]?.kind === 'fetching'

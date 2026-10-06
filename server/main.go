@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -23,12 +22,6 @@ const (
 )
 
 func main() {
-	if util.LocalMode() {
-		// 双击运行时以程序所在目录为工作目录，data.db、static、downloads 都放在这里
-		if exe, err := os.Executable(); err == nil {
-			_ = os.Chdir(filepath.Dir(exe))
-		}
-	}
 	checkFFmpeg()
 	// 初始化数据表
 	mustInitTables()
@@ -53,11 +46,7 @@ func listenAddr() string {
 		}
 		port = p
 	}
-	host := os.Getenv("BILIDOWN_HOST")
-	if host == "" && util.LocalMode() {
-		host = "127.0.0.1" // 本机版默认不对局域网开放
-	}
-	return fmt.Sprintf("%s:%d", host, port)
+	return fmt.Sprintf("%s:%d", os.Getenv("BILIDOWN_HOST"), port)
 }
 
 // withAuth 在设置了环境变量 BILIDOWN_AUTH=用户名:密码 时启用 HTTP Basic 认证，未设置则不做任何限制。
@@ -93,10 +82,6 @@ func mustRunServer() {
 
 	addr := listenAddr()
 	log.Printf("Bilidown %s listening on %s", VERSION, addr)
-	if util.LocalMode() {
-		_, port, _ := strings.Cut(addr, ":")
-		go openBrowser("http://127.0.0.1:" + port)
-	}
 	if err := http.ListenAndServe(addr, withAuth(mux)); err != nil {
 		log.Fatal("http.ListenAndServe:", err)
 	}

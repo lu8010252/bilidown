@@ -57,8 +57,6 @@ const post = async (action: string, id: number) => {
 export const pauseTask = (id: number) => post('pauseTask', id)
 export const resumeTask = (id: number) => post('resumeTask', id)
 export const cancelTask = (id: number) => post('cancelTask', id)
-/** 本机模式：在资源管理器中定位文件 */
-export const showFile = (id: number) => post('showFile', id)
 
 /** 已完成任务的“下载到本机”地址：浏览器完整收到文件后，服务器会删除该文件 */
 export const fetchFileUrl = (id: number) => `/api/fetchFile?id=${id}`
