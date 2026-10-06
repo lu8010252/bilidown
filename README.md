@@ -1,144 +1,36 @@
-# Bilidown
+# Bilidown 无头版（服务器 / 机顶盒部署）
 
-[![GitHub Release](https://img.shields.io/github/v/release/iuroc/bilidown)](https://github.com/iuroc/bilidown/releases)
+基于上游 `iuroc/bilidown` v2.1.1 的改动：
 
-哔哩哔哩视频解析下载工具，支持 8K 视频、Hi-Res 音频、杜比视界下载、批量解析，可扫码登录，常驻托盘。
+- 去掉系统托盘和自动打开浏览器，纯服务运行，`CGO_ENABLED=0` 即可编译，arm64 / amd64 通用。
+- 任务列表新增 **↓ 下载到本机** 按钮：浏览器完整收到文件后，服务器才删除该文件，服务器只做临时中转。传输中断则文件保留，可重试。
+- 磁盘保护：下载前检查剩余空间（`BILIDOWN_MIN_FREE_MB`，默认 1024），空间不足时拒绝任务；任务失败时自动清理 `.audio` / `.video` 临时文件。
+- 可选访问密码：`BILIDOWN_AUTH=用户名:密码`（HTTP Basic）。
+- 安全修复：移除原 `/api/downloadVideo`（接受任意路径，可读取服务器上任意文件）和在服务器上调用 explorer/xdg-open 的 `/api/showFile`；同时去掉应用内的播放预览，文件只能按任务 ID 通过 `/api/fetchFile` 下载。
 
-## 支持解析的链接类型
+## 环境变量
 
--   【单个视频】https://www.bilibili.com/video/BV1LLDCYJEU3/
--   【番剧和影视剧】https://www.bilibili.com/bangumi/play/ss48831
--   【视频合集】https://space.bilibili.com/282565107/channel/collectiondetail?sid=1427135
--   【收藏夹】https://space.bilibili.com/1176277996/favlist?fid=1234122612
--   【UP 主空间地址】等待 3.x 版本支持
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `BILIDOWN_PORT` | 8098 | 监听端口 |
+| `BILIDOWN_HOST` | 空 | 监听地址，空为所有网卡 |
+| `BILIDOWN_AUTH` | 空 | `用户名:密码`，空则不启用认证 |
+| `BILIDOWN_DB` | `./data.db` | 数据库路径（容器内为 `/data/data.db`） |
+| `BILIDOWN_MIN_FREE_MB` | 1024 | 保留的最小剩余空间，0 关闭 |
 
-## 使用说明
-
-1. 从 [Releases](https://github.com/iuroc/bilidown/releases) 下载适合您系统版本的安装包
-2. 非 Windows 系统，请先安装 [FFmpeg 工具](https://www.ffmpeg.org/)
-3. 将安装包解压后执行即可
-
-## 第三方客户端
-
-感谢社区开发者对 Bilidown 的支持。
-
-- **bilidown-for-mac**（macOS 原生客户端）
-  - 项目地址：https://github.com/Qwehhh2233/bilidown-for-mac
-  - 基于 Bilidown 后端实现，由社区开发者维护，为 macOS 用户提供原生客户端体验
-
-## 软件特色
-
-1. 前端采用 [Bootstrap](https://github.com/twbs/bootstrap) 和 [VanJS](https://github.com/vanjs-org/van) 构建，轻量美观
-2. 后端使用 Go 语言开发，数据库采用 SQlite，简化构建和部署过程
-3. 前端通过 [p-queue](https://github.com/sindresorhus/p-queue) 控制并发请求，加快批量解析速度
-
-## 其他说明
-
--   本程序不支持也不建议 HTTP 代理，直接使用国内网络访问能提升批量解析的成功率和稳定性。
-
-## 打包可执行文件
-
-```shell
-git clone https://github.com/iuroc/bilidown
-cd bilidown/client
-pnpm install
-pnpm build
-cd ../server
-go mod tidy
-CGO_ENABLED=1 go build
-```
-
-## 交叉编译
-
-### 说明
-
--   镜像名称：`iuroc/cgo-cross-build`
--   支持的系统架构
-    -   `linux/amd64`
-    -   `windows/amd64`
-    -   `windows/386`
-    -   `windows/arm64`
-    -   `darwin/amd64`
-    -   `darwin/arm64`
-
-### 拉取镜像和项目源码
-
-```shell
-docker pull iuroc/cgo-cross-build:latest
-git clone https://github.com/iuroc/bilidown
-```
-
-### 交叉编译发行版
-
-> 执行 `goreleaser` 命令时将自动执行 `pnpm build` 和 `go mod tidy`
-
-将 `ffmpeg.exe` 放入 `server/bin` 目录内。
-
-在项目根目录执行如下代码，进入 Docker 容器。
-
-```shell
-docker run --rm -it -v .:/usr/src/data iuroc/cgo-cross-build
-```
-
-在容器内的终端执行如下代码，开始交叉编译。
-
-```shell
-cd server
-git tag v2.1.1
-goreleaser release --snapshot --clean
-# 正式发行
-# GITHUB_TOKEN=xxx goreleaser release --clean
-```
-
-### 编译指定系统架构
-
-```ini
-# 按上面的步骤进入 Docker 容器内终端
-
-# [darwin-amd64]
-GOOS=darwin
-GOARCH=amd64
-CC=o64-clang
-CGO_ENABLED=1
-go build
-```
-
-### 非 Docker 环境编译
-
-在 Linux amd64 平台上执行 `go build` 时，您可能需要安装以下依赖包：  
+## 部署
 
 ```bash
-sudo apt install pkg-config gcc libayatana-appindicator3-dev
+git clone https://github.com/iuroc/bilidown && cd bilidown
+git apply bilidown-headless.patch     # 或 patch -p1 < bilidown-headless.patch
+# 修改 docker-compose.yml 里的密码和下载目录
+docker compose up -d --build
 ```
 
-## 开发环境
+浏览器访问 `http://盒子IP:8098`，首次使用先在页面里扫码登录 B 站。
+需要 `ffmpeg`（镜像内已包含；不用 Docker 时请 `apt install ffmpeg`）。
 
-```bash
-# client
-pnpm install
-pnpm dev
-# server
-go build && ./bilidown
-```
+## 来源与许可
 
-## 特别感谢
-
--   [twbs/bootstrap](https://github.com/twbs/bootstrap) - 前端开发必备的响应式框架，简化页面布局
--   [vanjs-org/van](https://github.com/vanjs-org/van) - 轻量级的前端框架，专注于构建高效应用
--   [vitejs/vite](https://github.com/vitejs/vite) - 快速的前端构建工具，基于 ES 模块开发
--   [SocialSisterYi/bilibili-API-collec](https://github.com/SocialSisterYi/bilibili-API-collect) - B 站 API 集合，支持多种操作接口
--   [sindresorhus/p-queue](https://github.com/sindresorhus/p-queue) - 支持并发限制的 JavaScript 队列处理库
--   [iuroc/vanjs-router](https://github.com/iuroc/vanjs-router) - 轻量级前端路由工具，适用于 Van.js 框架
--   [uuidjs/uuid](https://www.npmjs.com/package/uuid) - 用于生成唯一标识符（UUID）的 JavaScript 库
--   [getlantern/systray](https://github.com/getlantern/systray) - 简单的跨平台系统托盘图标库，支持图标管理
--   [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) - Go 语言的 SQLite3 数据库驱动，轻量高效
--   [skip2/go-qrcode](https://github.com/skip2/go-qrcode) - 生成 QR 码的 Go 语言库，简单易用
-
-## 软件界面
-
-![](./docs/2024-11-05_090604.png)
-
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=iuroc/bilidown&type=Date)](https://www.star-history.com/#iuroc/bilidown&Date)
+本项目基于 [iuroc/bilidown](https://github.com/iuroc/bilidown) v2.1.1 修改而来，沿用其 [Apache-2.0](./LICENSE) 许可证。
+上面列出的内容是相对上游所做的修改；上游的原始说明、桌面版安装包和截图未随本仓库提供，请见上游项目主页。
