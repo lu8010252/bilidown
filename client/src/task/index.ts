@@ -45,7 +45,7 @@ export class TaskRoute implements VanComponent {
                     () => div({ class: 'list-group', hidden: _that.loading.val },
                         _that.taskList.val.map(task => {
                             const ext = task.downloadType === 'audio' ? '.m4a' : '.mp4'
-                            const filename = `${task.title} ${btoa(task.id.toString()).replace(/=/g, '')}${ext}`
+                            const filename = `${task.title}${ext}`
                             return div({
                                 class: () => `list-group-item p-0 hstack user-select-none ${task.statusState.val != 'done' && task.statusState.val != 'error' || task.transferring.val ? 'disabled' : ''}`,
                                 hidden: task.deleting,

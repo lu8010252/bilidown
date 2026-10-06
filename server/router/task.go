@@ -67,7 +67,8 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_task := task.Task{TaskInDB: item}
-		_task.Title = util.FilterFileName(_task.Title)
+		// 去掉非法字符，并限制长度：磁盘上的文件名还要加编号和后缀，整体不能超过 255 字节
+		_task.Title = util.TruncateBytes(util.FilterFileName(_task.Title), 200)
 		err = _task.Create(db)
 		if err != nil {
 			util.Res{Success: false, Message: fmt.Sprintf("_task.Create: %v.", err)}.Write(w)
