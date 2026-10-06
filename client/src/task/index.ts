@@ -1,38 +1,243 @@
 import van, { State } from 'vanjs-core'
 import { Route, goto, now } from 'vanjs-router'
-import { checkLogin, formatBytes, GLOBAL_HAS_LOGIN, GLOBAL_HIDE_PAGE, ResJSON, VanComponent } from '../mixin'
-import { deleteTask, fetchFileUrl, getActiveTask, getTaskList } from './data'
+import { checkLogin, formatBytes, GLOBAL_HAS_LOGIN, VanComponent } from '../mixin'
+import { cancelTask, deleteTask, getActiveTask, getTaskList, pauseTask, resumeTask, showFile } from './data'
 import { TaskInDB, TaskStatus } from '../work/type'
 import { LoadingBox } from '../view'
+import { autoFetch, enqueueFetch, fetchStates, localMode, setAutoFetch } from '../fetch'
 
-const { div, span } = van.tags
+const { button, div, input, label, span } = van.tags
 
 const { svg, path } = van.tags('http://www.w3.org/2000/svg')
+
+type Row = TaskInDB & {
+    /** 音频下载进度百分比 */
+    audioProgress: State<number>
+    /** 视频下载进度百分比 */
+    videoProgress: State<number>
+    /** 合并进度百分比 */
+    mergeProgress: State<number>
+    /** 任务状态 */
+    statusState: State<TaskStatus>
+    /** 是否已暂停 */
+    paused: State<boolean>
+    /** 服务器上的文件是否已清理 */
+    goneState: State<boolean>
+    /** 是否正在删除 */
+    deleting: State<boolean>
+}
 
 export class TaskRoute implements VanComponent {
     element: HTMLElement
     loading = van.state(false)
 
-    taskList: State<(TaskInDB & {
-        /** 音频下载进度百分比 */
-        audioProgress: State<number>
-        /** 视频下载进度百分比 */
-        videoProgress: State<number>
-        /** 合并进度百分比 */
-        mergeProgress: State<number>
-        /** 任务状态 */
-        statusState: State<TaskStatus>
-        /** 是否正在传输到本机 */
-        transferring: State<boolean>
-        /** 服务器上的文件是否已清理 */
-        goneState: State<boolean>
-        /** 是否正在删除 */
-        deleting: State<boolean>
-    })[]> = van.state([])
+    taskList: State<Row[]> = van.state([])
+
+    /** 批量取回时勾选的任务 ID */
+    selected = van.state<number[]>([])
 
     constructor() {
 
         this.element = this.Root()
+    }
+
+    /** 文件已经不在服务器上（已取回并清理） */
+    isGone(task: Row) {
+        return task.goneState.val || fetchStates.val[task.id]?.kind === 'done'
+    }
+
+    /** 可以取回：已完成、文件还在服务器上、且没有正在排队/传输 */
+    isFetchable(task: Row) {
+        if (task.statusState.val !== 'done' || this.isGone(task)) return false
+        const kind = fetchStates.val[task.id]?.kind
+        return kind !== 'queued' && kind !== 'fetching'
+    }
+
+    /** 下载中（含排队、暂停），且还没进入合并阶段，才能暂停/取消 */
+    isControllable(task: Row) {
+        return (task.statusState.val === 'running' || task.statusState.val === 'waiting') && task.mergeProgress.val === 0
+    }
+
+    Toolbar() {
+        const _that = this
+        const fetchable = () => _that.taskList.val.filter(task => _that.isFetchable(task))
+        const selectedFetchable = () => fetchable().filter(task => _that.selected.val.includes(task.id))
+        return div({
+            class: 'app-panel p-2 px-3 hstack gap-3 flex-wrap',
+            hidden: () => localMode.val,
+        },
+            div({ class: 'form-check form-switch mb-0' },
+                input({
+                    class: 'form-check-input', type: 'checkbox', role: 'switch', id: 'auto-fetch-switch',
+                    checked: () => autoFetch.val,
+                    onchange: (event: Event) => setAutoFetch((event.target as HTMLInputElement).checked),
+                }),
+                label({
+                    class: 'form-check-label', for: 'auto-fetch-switch',
+                    title: '开启后，每个下载完成的文件会自动传到本机，传完服务器自动删除',
+                }, '下载完成后自动取回'),
+            ),
+            div({ class: 'form-check mb-0', hidden: () => fetchable().length === 0 },
+                input({
+                    class: 'form-check-input', type: 'checkbox', id: 'fetch-select-all',
+                    checked: () => fetchable().length > 0 && selectedFetchable().length === fetchable().length,
+                    onchange: (event: Event) => {
+                        _that.selected.val = (event.target as HTMLInputElement).checked
+                            ? fetchable().map(task => task.id) : []
+                    },
+                }),
+                label({ class: 'form-check-label', for: 'fetch-select-all' }, '全选'),
+            ),
+            button({
+                class: 'btn btn-sm btn-primary',
+                disabled: () => selectedFetchable().length === 0,
+                onclick() {
+                    enqueueFetch(selectedFetchable().map(task => task.id))
+                    _that.selected.val = []
+                }
+            }, () => `取回选中 (${selectedFetchable().length})`),
+            button({
+                class: 'btn btn-sm btn-outline-primary',
+                disabled: () => fetchable().length === 0,
+                onclick() {
+                    enqueueFetch(fetchable().map(task => task.id))
+                    _that.selected.val = []
+                }
+            }, () => `取回全部已完成 (${fetchable().length})`),
+        )
+    }
+
+    Subtitle(task: Row) {
+        const _that = this
+        return () => {
+            const status = task.statusState.val
+            if (status === 'waiting') return task.paused.val ? '已暂停（排队中）' : '等待下载'
+            if (status === 'error') return '下载失败'
+            if (status === 'done') {
+                if (localMode.val) return `已保存到 ${task.folder}`
+                if (_that.isGone(task)) return '已取回到本机，服务器文件已清理'
+                const state = fetchStates.val[task.id]
+                if (state?.kind === 'queued') return '排队等待取回…'
+                if (state?.kind === 'fetching') return '正在传输到本机…'
+                if (state?.kind === 'failed') return `取回失败：${state.message}`
+                const size = task.fileSize ? `（${formatBytes(task.fileSize)}）` : ''
+                return `文件在服务器上${size}，点右侧 ↓ 取回到本机（传完后自动删除服务器文件）`
+            }
+            const prefix = task.paused.val ? '已暂停 ' : '正在'
+            if (task.videoProgress.val == 0) {
+                return `${prefix}下载音频 (${(task.audioProgress.val * 100).toFixed(2)}%)`
+            } else if (task.mergeProgress.val == 0) {
+                return `${prefix}下载视频 (${(task.videoProgress.val * 100).toFixed(2)}%)`
+            } else {
+                return `正在合并音视频 (${(task.mergeProgress.val * 100).toFixed(2)}%)`
+            }
+        }
+    }
+
+    Row(task: Row) {
+        const _that = this
+        const ext = task.downloadType === 'audio' ? '.m4a' : '.mp4'
+        const filename = `${task.title}${ext}`
+        const iconBtn = (title: string, hidden: () => boolean, icon: Element, onclick: () => void) => div({
+            class: 'me-3', hidden,
+        }, div({ class: 'hover-btn', title, onclick }, icon))
+
+        return div({
+            class: 'list-group-item p-0 hstack user-select-none',
+            hidden: task.deleting,
+        },
+            div({ class: 'ps-3', hidden: () => localMode.val || !_that.isFetchable(task) },
+                input({
+                    class: 'form-check-input', type: 'checkbox', title: '选择，用于批量取回',
+                    checked: () => _that.selected.val.includes(task.id),
+                    onchange: (event: Event) => {
+                        const on = (event.target as HTMLInputElement).checked
+                        _that.selected.val = on
+                            ? [..._that.selected.val, task.id]
+                            : _that.selected.val.filter(id => id !== task.id)
+                    },
+                })
+            ),
+            div({ class: 'vstack gap-2 py-2 px-3' },
+                div({
+                    class: () => `
+                    ${task.statusState.val == 'error' ? 'text-danger' : ''}
+                    ${task.statusState.val == 'waiting' || task.statusState.val == 'running'
+                            ? (task.paused.val ? 'text-warning' : 'text-primary') : ''}`
+                },
+                    span({
+                        class: `me-2 badge ${task.downloadType === 'audio' ? 'bg-success' : 'bg-primary'}`,
+                        title: task.downloadType === 'audio' ? '音频' : '视频'
+                    }, task.downloadType === 'audio' ? 'A' : 'V'),
+                    span({}, filename),
+                ),
+                div({ class: 'text-secondary small' }, _that.Subtitle(task)),
+                div({
+                    class: `progress`,
+                    style: `height: 5px`,
+                    hidden: () => task.statusState.val == 'done' || task.statusState.val == 'error'
+                },
+                    div({
+                        class: () => `progress-bar ${task.paused.val ? 'bg-warning' : 'progress-bar-striped progress-bar-animated'} bg-${(() => {
+                            if (task.paused.val) return 'warning'
+                            if (task.videoProgress.val == 0) return 'primary'
+                            if (task.mergeProgress.val == 0) return 'success'
+                            else return 'info'
+                        })()}`,
+                        style: () => {
+                            let width = 0
+                            if (task.videoProgress.val == 0) width = task.audioProgress.val * 100
+                            else if (task.mergeProgress.val == 0) width = task.videoProgress.val * 100
+                            else width = task.mergeProgress.val * 100
+                            return `width: ${width}%`
+                        }
+                    }),
+                )
+            ),
+
+            // 暂停 / 继续
+            iconBtn('暂停', () => !_that.isControllable(task) || task.paused.val, _that.PauseSVG(), () => {
+                pauseTask(task.id).then(() => { task.paused.val = true }).catch(error => alert(error.message))
+            }),
+            iconBtn('继续', () => !_that.isControllable(task) || !task.paused.val, _that.PlaySVG(), () => {
+                resumeTask(task.id).then(() => { task.paused.val = false }).catch(error => alert(error.message))
+            }),
+            // 取消下载（会删除已下载的部分和任务记录）
+            iconBtn('取消下载', () => !_that.isControllable(task), _that.CancelSVG(), () => {
+                if (!confirm('取消这个下载？已下载的部分会被删除。')) return
+                cancelTask(task.id).then(() => {
+                    _that.taskList.val = _that.taskList.val.filter(t => t.id != task.id)
+                }).catch(error => alert(error.message))
+            }),
+
+            // 服务器模式：取回到本机
+            iconBtn('取回到本机（传完后删除服务器文件）',
+                () => localMode.val || !_that.isFetchable(task) || task.deleting.val,
+                _that.DownloadSVG(),
+                () => enqueueFetch([task.id])),
+            // 本机模式：在资源管理器中定位
+            div({
+                class: 'me-3', hidden: () => !localMode.val || task.statusState.val != 'done' || task.goneState.val,
+            }, button({
+                class: 'btn btn-sm btn-outline-secondary text-nowrap',
+                onclick: () => showFile(task.id).catch(error => alert(error.message)),
+            }, '打开位置')),
+
+            iconBtn('删除视频',
+                () => task.statusState.val != 'done' && task.statusState.val != 'error'
+                    || fetchStates.val[task.id]?.kind === 'fetching'
+                    || task.deleting.val,
+                _that.DeleteSVG(),
+                () => {
+                    task.deleting.val = true
+                    deleteTask(task.id).then(() => {
+                        _that.taskList.val = _that.taskList.val.filter(taskInDB => taskInDB.id != task.id)
+                    }).catch(error => {
+                        task.deleting.val = false
+                        alert(error.message)
+                    })
+                }),
+        )
     }
 
     Root() {
@@ -40,119 +245,11 @@ export class TaskRoute implements VanComponent {
         return Route({
             rule: 'task',
             Loader() {
-                return div(
+                return div({ class: 'vstack gap-3' },
+                    _that.Toolbar(),
                     () => _that.loading.val ? LoadingBox() : '',
                     () => div({ class: 'list-group', hidden: _that.loading.val },
-                        _that.taskList.val.map(task => {
-                            const ext = task.downloadType === 'audio' ? '.m4a' : '.mp4'
-                            const filename = `${task.title}${ext}`
-                            return div({
-                                class: () => `list-group-item p-0 hstack user-select-none ${task.statusState.val != 'done' && task.statusState.val != 'error' || task.transferring.val ? 'disabled' : ''}`,
-                                hidden: task.deleting,
-                            },
-                                div({ class: 'vstack gap-2 py-2 px-3' },
-                                    div({
-                                        class: () => `
-                                        ${task.statusState.val == 'error' ? 'text-danger' : ''}
-                                        ${task.statusState.val == 'waiting' || task.statusState.val == 'running'
-                                                ? 'text-primary' : ''}`
-                                    },
-                                        () => {
-                                            if (task.transferring.val) return '正在传输到本机...'
-                                            return div(
-                                                span({
-                                                    class: `me-2 badge ${task.downloadType === 'audio' ? 'bg-success' : 'bg-primary'}`,
-                                                    title: task.downloadType === 'audio' ? '音频' : '视频'
-                                                }, task.downloadType === 'audio' ? 'A' : 'V'),
-                                                span({}, filename),
-                                            )
-                                        }),
-                                    div({ class: 'text-secondary small' },
-                                        () => {
-                                            if (task.statusState.val == 'waiting') return '等待下载'
-                                            if (task.statusState.val == 'error') return '下载失败'
-                                            if (task.statusState.val == 'done') {
-                                                if (task.goneState.val) return '已下载到本机，服务器文件已清理'
-                                                return `文件在服务器上${task.fileSize ? `（${formatBytes(task.fileSize)}）` : ''}，点右侧 ↓ 下载到本机（传完后自动删除服务器文件）`
-                                            }
-                                            if (task.videoProgress.val == 0) {
-                                                return `正在下载音频 (${(task.audioProgress.val * 100).toFixed(2)}%)`
-                                            } else if (task.mergeProgress.val == 0) {
-                                                return `正在下载视频 (${(task.videoProgress.val * 100).toFixed(2)}%)`
-                                            } else if (task.statusState.val == 'running') {
-                                                return `正在合并音视频 (${(task.mergeProgress.val * 100).toFixed(2)}%)`
-                                            } else {
-                                                return task.folder
-                                            }
-                                        }
-                                    ),
-                                    div({
-                                        class: `progress`,
-                                        style: `height: 5px`,
-                                        hidden: () => task.statusState.val == 'done' || task.statusState.val == 'error'
-                                    },
-                                        div({
-                                            class: () => `progress-bar progress-bar-striped progress-bar-animated bg-${(() => {
-                                                if (task.videoProgress.val == 0) return 'primary'
-                                                if (task.mergeProgress.val == 0) return 'success'
-                                                else return 'info'
-                                            })()}`,
-                                            style: () => {
-                                                let width = 0
-                                                if (task.videoProgress.val == 0) width = task.audioProgress.val * 100
-                                                else if (task.mergeProgress.val == 0) width = task.videoProgress.val * 100
-                                                else width = task.mergeProgress.val * 100
-                                                return `width: ${width}%`
-                                            }
-                                        }),
-                                    )
-                                ),
-                                div({
-                                    class: 'me-4',
-                                    hidden: () => task.statusState.val != 'done'
-                                        || task.goneState.val  // 服务器上已没有文件
-                                        || task.transferring.val  // 正在传输时不重复触发
-                                        || task.deleting.val
-                                },
-                                    div({
-                                        class: 'hover-btn', title: '下载到本机（传完后删除服务器文件）',
-                                        onclick() {
-                                            task.transferring.val = true
-                                            const link = document.createElement('a')
-                                            link.href = fetchFileUrl(task.id)
-                                            link.download = ''
-                                            document.body.appendChild(link)
-                                            link.click()
-                                            link.remove()
-                                            _that.waitFileGone(task)
-                                        }
-                                    },
-                                        _that.DownloadSVG()
-                                    )
-                                ),
-                                div({
-                                    class: 'me-4',
-                                    hidden: task.statusState.val != 'done'
-                                        && task.statusState.val != 'error'
-                                        || task.transferring.val  // 正在打开文件位置时，不应该显示删除按钮
-                                        || task.deleting.val  // 正在删除时，不应该显示删除按钮
-                                },
-                                    div({
-                                        class: 'hover-btn', title: '删除视频',
-                                        onclick() {
-                                            task.deleting.val = true
-                                            deleteTask(task.id).then(() => {
-                                                _that.taskList.val = _that.taskList.val.filter(taskInDB => taskInDB.id != task.id)
-                                            }).catch(error => {
-                                                alert(error.message)
-                                            })
-                                        }
-                                    },
-                                        _that.DeleteSVG()
-                                    )
-                                ),
-                            )
-                        })
+                        _that.taskList.val.map(task => _that.Row(task))
                     )
                 )
             },
@@ -162,6 +259,7 @@ export class TaskRoute implements VanComponent {
             async onLoad() {
                 if (!GLOBAL_HAS_LOGIN.val) return goto('login')
                 _that.loading.val = true
+                _that.selected.val = []
 
                 getTaskList(0, 360).then(taskList => {
                     if (!taskList) return
@@ -171,7 +269,7 @@ export class TaskRoute implements VanComponent {
                         videoProgress: van.state(1),
                         mergeProgress: van.state(1),
                         statusState: van.state(task.status),
-                        transferring: van.state(false),
+                        paused: van.state(false),
                         goneState: van.state(!!task.fileGone),
                         deleting: van.state(false)
                     }))
@@ -189,11 +287,20 @@ export class TaskRoute implements VanComponent {
                                     taskInDB.audioProgress.val = task.audioProgress
                                     taskInDB.videoProgress.val = task.videoProgress
                                     taskInDB.mergeProgress.val = task.mergeProgress
-                                    taskInDB.statusState.val = task.status
+                                    taskInDB.paused.val = !!task.paused
+                                    if (taskInDB.statusState.val != task.status) {
+                                        taskInDB.statusState.val = task.status
+                                        // 刚完成的任务：补充真实文件大小
+                                        if (task.status == 'done') getTaskList(0, 360).then(list => {
+                                            const item = list?.find(t => t.id == task.id)
+                                            if (item) taskInDB.fileSize = item.fileSize
+                                        }).catch(() => { })
+                                    }
                                 }
                             })
                         })
-                        if (activeTaskList.filter(task => task.status == 'running').length == 0) {
+                        // 还有排队中或下载中的任务就继续刷新
+                        if (activeTaskList.filter(task => task.status == 'running' || task.status == 'waiting').length == 0) {
                             clearInterval(timer)
                             clearInterval(helper)
                         }
@@ -229,30 +336,23 @@ export class TaskRoute implements VanComponent {
         )
     }
 
-    /**
-     * 浏览器的文件下载由浏览器自己接管，页面无法得知何时完成，
-     * 所以每 3 秒向服务器确认一次文件是否已被清理（服务器在完整传输后才会删除）。
-     * 最多等待 2 小时；传输中断时文件会保留，到时恢复按钮即可重新下载。
-     */
-    waitFileGone(task: { id: number, transferring: State<boolean>, goneState: State<boolean> }) {
-        const deadline = Date.now() + 2 * 3600 * 1000
-        const timer = setInterval(async () => {
-            try {
-                const list = await getTaskList(0, 360)
-                const item = list?.find(t => t.id == task.id)
-                if (item?.fileGone) {
-                    task.goneState.val = true
-                    task.transferring.val = false
-                    clearInterval(timer)
-                    return
-                }
-            } catch (_) { /* 网络抖动时继续等待 */ }
-            if (Date.now() > deadline || now.val.split('/')[0] != 'task') {
-                task.transferring.val = false
-                clearInterval(timer)
-            }
-        }, 3000)
+    PauseSVG() {
+        return svg({ style: `width: 1em; height: 1em`, fill: "currentColor", class: "bi bi-pause-fill", viewBox: "0 0 16 16" },
+            path({ "d": "M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5m5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5" }),
+        )
+    }
+
+    PlaySVG() {
+        return svg({ style: `width: 1em; height: 1em`, fill: "currentColor", class: "bi bi-play-fill", viewBox: "0 0 16 16" },
+            path({ "d": "m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393" }),
+        )
+    }
+
+    CancelSVG() {
+        return svg({ style: `width: 1em; height: 1em`, fill: "currentColor", class: "bi bi-x-lg", viewBox: "0 0 16 16" },
+            path({ "d": "M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z" }),
+        )
     }
 }
 
-export default () => new TaskRoute().element
+export default () => new TaskRoute().element
