@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -31,6 +32,24 @@ func (client *BiliClient) SimpleGET(_url string, params map[string]string) (*htt
 		return nil, err
 	}
 	request.Header = client.MakeHeader()
+	return _client.Do(request)
+}
+
+// RangeGET 从 offset 字节处开始请求（断点续传）。offset 为 0 时等同于普通请求。
+func (client *BiliClient) RangeGET(_url string, offset int64) (*http.Response, error) {
+	_client := http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(nil),
+		},
+	}
+	request, err := http.NewRequest("GET", _url, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header = client.MakeHeader()
+	if offset > 0 {
+		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+	}
 	return _client.Do(request)
 }
 

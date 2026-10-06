@@ -9,7 +9,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
+	"sync"
 
 	"bilidown/task"
 	"bilidown/util"
@@ -79,6 +83,104 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 	util.Res{Success: true, Message: "创建成功"}.Write(w)
 }
 
+// fetching 记录正在被“下载到本机”的任务，避免同一文件被两个浏览器标签/批量队列同时取回。
+var (
+	fetching   = map[int64]bool{}
+	fetchingMu sync.Mutex
+)
+
+func claimFetch(id int64) bool {
+	fetchingMu.Lock()
+	defer fetchingMu.Unlock()
+	if fetching[id] {
+		return false
+	}
+	fetching[id] = true
+	return true
+}
+
+func releaseFetch(id int64) {
+	fetchingMu.Lock()
+	delete(fetching, id)
+	fetchingMu.Unlock()
+}
+
+func isFetching(id int64) bool {
+	fetchingMu.Lock()
+	defer fetchingMu.Unlock()
+	return fetching[id]
+}
+
+// getMode 告诉前端当前是服务器模式还是本机模式
+func getMode(w http.ResponseWriter, r *http.Request) {
+	util.Res{Success: true, Data: map[string]any{"local": util.LocalMode()}}.Write(w)
+}
+
+// activeTaskFromRequest 按 id 参数找到内存中的任务（暂停/继续/取消用）
+func activeTaskFromRequest(w http.ResponseWriter, r *http.Request) (*task.Task, bool) {
+	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		util.Res{Success: false, Message: "参数错误"}.Write(w)
+		return nil, false
+	}
+	t := task.FindActiveTask(id)
+	if t == nil {
+		util.Res{Success: false, Message: "任务不存在或已结束"}.Write(w)
+		return nil, false
+	}
+	return t, true
+}
+
+func pauseTask(w http.ResponseWriter, r *http.Request) {
+	if t, ok := activeTaskFromRequest(w, r); ok {
+		if !t.SetPaused(true) {
+			util.Res{Success: false, Message: "当前状态无法暂停（可能正在合并或已结束）"}.Write(w)
+			return
+		}
+		util.Res{Success: true, Message: "已暂停"}.Write(w)
+	}
+}
+
+func resumeTask(w http.ResponseWriter, r *http.Request) {
+	if t, ok := activeTaskFromRequest(w, r); ok {
+		if !t.SetPaused(false) {
+			util.Res{Success: false, Message: "当前状态无法继续"}.Write(w)
+			return
+		}
+		util.Res{Success: true, Message: "已继续"}.Write(w)
+	}
+}
+
+func cancelTask(w http.ResponseWriter, r *http.Request) {
+	if t, ok := activeTaskFromRequest(w, r); ok {
+		if !t.Cancel() {
+			util.Res{Success: false, Message: "当前状态无法取消（可能正在合并或已结束）"}.Write(w)
+			return
+		}
+		util.Res{Success: true, Message: "已取消"}.Write(w)
+	}
+}
+
+// showFile 仅本机模式注册：在资源管理器/访达中定位已完成任务的文件
+func showFile(w http.ResponseWriter, r *http.Request) {
+	t, ok := lookupDoneTask(w, r)
+	if !ok {
+		return
+	}
+	path := t.FilePath()
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", "/select,"+path)
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	default:
+		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	}
+	_ = cmd.Start() // explorer 即使成功也常返回非 0，只管启动
+	util.Res{Success: true, Message: "已打开"}.Write(w)
+}
+
 func getActiveTask(w http.ResponseWriter, r *http.Request) {
 	util.Res{Success: true, Data: task.GlobalTaskList}.Write(w)
 }
@@ -111,6 +213,7 @@ func getTaskList(w http.ResponseWriter, r *http.Request) {
 			} else {
 				tasks[i].FileSize = info.Size()
 			}
+			tasks[i].Fetching = isFetching(tasks[i].ID)
 		}
 	}
 	util.Res{Success: true, Message: "获取成功", Data: tasks}.Write(w)
@@ -153,6 +256,11 @@ func fetchFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !claimFetch(t.ID) {
+		http.Error(w, "该文件正在被取回", http.StatusConflict)
+		return
+	}
+	defer releaseFetch(t.ID)
 	path := t.FilePath()
 	f, err := os.Open(path)
 	if err != nil {

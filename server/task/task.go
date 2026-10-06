@@ -48,6 +48,8 @@ type TaskInDB struct {
 	FileGone bool `json:"fileGone"`
 	// FileSize 文件仍在服务器上时的真实大小（字节），仅在返回任务列表时计算。
 	FileSize int64 `json:"fileSize"`
+	// Fetching 表示该文件正在被“下载到本机”，仅在返回任务列表时计算。
+	Fetching bool `json:"fetching"`
 }
 
 func (task *TaskInDB) FilePath() string {
@@ -71,6 +73,13 @@ type Task struct {
 	AudioProgress float64 `json:"audioProgress"`
 	VideoProgress float64 `json:"videoProgress"`
 	MergeProgress float64 `json:"mergeProgress"`
+	// Paused 表示用户已暂停该任务（状态仍为 running/waiting）
+	Paused bool `json:"paused"`
+
+	ctlMu    sync.Mutex
+	canceled bool
+	semHeld  bool
+	wake     chan struct{}
 }
 
 var GlobalTaskList = []*Task{}
@@ -127,9 +136,9 @@ func (task *Task) Start() {
 		}
 	}()
 
-	GlobalDownloadSem.Acquire()
+	task.acquireSem()
 	if err := util.CheckDisk(task.Folder, 0); err != nil {
-		GlobalDownloadSem.Release()
+		task.releaseSem()
 		task.UpdateStatus(db, "error", err)
 		return
 	}
@@ -139,11 +148,11 @@ func (task *Task) Start() {
 		// 仅音频模式：只下载音频，重命名音频文件为输出文件
 		err = DownloadMedia(client, task.Audio, task, "audio")
 		if err != nil {
-			GlobalDownloadSem.Release()
-			task.UpdateStatus(db, "error", fmt.Errorf("DownloadMedia: %v", err))
+			task.releaseSem()
+			task.downloadFailed(db, err)
 			return
 		}
-		GlobalDownloadSem.Release()
+		task.releaseSem()
 		outputPath := task.TaskInDB.FilePath()
 		audioPath := filepath.Join(task.Folder, strconv.FormatInt(task.ID, 10)+".audio")
 		err = os.Rename(audioPath, outputPath)
@@ -161,11 +170,11 @@ func (task *Task) Start() {
 		// 仅视频模式：只下载视频，重命名视频文件为输出文件
 		err = DownloadMedia(client, task.Video, task, "video")
 		if err != nil {
-			GlobalDownloadSem.Release()
-			task.UpdateStatus(db, "error", fmt.Errorf("DownloadMedia: %v", err))
+			task.releaseSem()
+			task.downloadFailed(db, err)
 			return
 		}
-		GlobalDownloadSem.Release()
+		task.releaseSem()
 		outputPath := task.TaskInDB.FilePath()
 		videoPath := filepath.Join(task.Folder, strconv.FormatInt(task.ID, 10)+".video")
 		err = os.Rename(videoPath, outputPath)
@@ -183,17 +192,17 @@ func (task *Task) Start() {
 		// 合并模式：下载音频和视频，然后合并
 		err = DownloadMedia(client, task.Audio, task, "audio")
 		if err != nil {
-			GlobalDownloadSem.Release()
-			task.UpdateStatus(db, "error", fmt.Errorf("DownloadMedia: %v", err))
+			task.releaseSem()
+			task.downloadFailed(db, err)
 			return
 		}
 		err = DownloadMedia(client, task.Video, task, "video")
 		if err != nil {
-			GlobalDownloadSem.Release()
-			task.UpdateStatus(db, "error", fmt.Errorf("DownloadMedia: %v", err))
+			task.releaseSem()
+			task.downloadFailed(db, err)
 			return
 		}
-		GlobalDownloadSem.Release()
+		task.releaseSem()
 
 		outputPath := task.TaskInDB.FilePath()
 		videoPath := filepath.Join(task.Folder, strconv.FormatInt(task.ID, 10)+".video")
@@ -334,59 +343,253 @@ func (task *Task) UpdateStatus(db *sql.DB, status TaskStatus, errs ...error) err
 	return err
 }
 
-func DownloadMedia(client *bilibili.BiliClient, _url string, task *Task, mediaType string) error {
-	var resp *http.Response
-	var err error
-	for i := 0; i < 5; i++ {
-		resp, err = client.SimpleGET(_url, nil)
-		if err == nil {
+// ErrCanceled 表示任务被用户取消
+var ErrCanceled = errors.New("任务已取消")
+
+// acquireSem 取得下载名额；已持有时直接返回
+func (task *Task) acquireSem() {
+	task.ctlMu.Lock()
+	held := task.semHeld
+	task.ctlMu.Unlock()
+	if held {
+		return
+	}
+	GlobalDownloadSem.Acquire()
+	task.ctlMu.Lock()
+	task.semHeld = true
+	task.ctlMu.Unlock()
+}
+
+// releaseSem 归还下载名额；重复调用是安全的
+func (task *Task) releaseSem() {
+	task.ctlMu.Lock()
+	held := task.semHeld
+	task.semHeld = false
+	task.ctlMu.Unlock()
+	if held {
+		GlobalDownloadSem.Release()
+	}
+}
+
+// wakeAll 唤醒正在等待继续的下载（需持有 ctlMu）
+func (task *Task) wakeAll() {
+	if task.wake != nil {
+		close(task.wake)
+		task.wake = nil
+	}
+}
+
+// SetPaused 暂停或继续任务。只有排队中/下载中的任务可以暂停，返回是否生效。
+func (task *Task) SetPaused(paused bool) bool {
+	task.ctlMu.Lock()
+	defer task.ctlMu.Unlock()
+	if task.Status != "running" && task.Status != "waiting" {
+		return false
+	}
+	if task.canceled || task.MergeProgress > 0 {
+		return false
+	}
+	task.Paused = paused
+	task.wakeAll()
+	return true
+}
+
+// Cancel 取消任务：停止下载、删除临时文件和任务记录
+func (task *Task) Cancel() bool {
+	task.ctlMu.Lock()
+	defer task.ctlMu.Unlock()
+	if task.Status != "running" && task.Status != "waiting" {
+		return false
+	}
+	if task.MergeProgress > 0 {
+		return false
+	}
+	task.canceled = true
+	task.Paused = false
+	task.wakeAll()
+	return true
+}
+
+func (task *Task) ctlState() (paused, canceled bool) {
+	task.ctlMu.Lock()
+	defer task.ctlMu.Unlock()
+	return task.Paused, task.canceled
+}
+
+// gate 在暂停期间让出下载名额并等待，继续后重新排队取得名额。
+func (task *Task) gate() error {
+	for {
+		task.ctlMu.Lock()
+		if task.canceled {
+			task.ctlMu.Unlock()
+			return ErrCanceled
+		}
+		if !task.Paused {
+			task.ctlMu.Unlock()
+			task.acquireSem()
+			return nil
+		}
+		if task.wake == nil {
+			task.wake = make(chan struct{})
+		}
+		ch := task.wake
+		task.ctlMu.Unlock()
+		task.releaseSem()
+		<-ch
+	}
+}
+
+func (task *Task) downloadFailed(db *sql.DB, err error) {
+	if errors.Is(err, ErrCanceled) {
+		task.finishCanceled(db)
+		return
+	}
+	task.UpdateStatus(db, "error", fmt.Errorf("DownloadMedia: %v", err))
+}
+
+// finishCanceled 清理被取消的任务：删临时文件、删记录、从内存列表移除
+func (task *Task) finishCanceled(db *sql.DB) {
+	task.cleanupTemp()
+	_ = DeleteTask(db, int(task.ID))
+	GlobalTaskMux.Lock()
+	for i, t := range GlobalTaskList {
+		if t == task {
+			GlobalTaskList = append(GlobalTaskList[:i], GlobalTaskList[i+1:]...)
 			break
 		}
 	}
+	GlobalTaskMux.Unlock()
+}
 
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// 已知大小时先确认空间够用（合并阶段还会再占用一份，所以按 2 倍估算）
-	if resp.ContentLength > 0 {
-		if err := util.CheckDisk(task.Folder, uint64(resp.ContentLength)*2); err != nil {
-			return err
+// FindActiveTask 在内存任务列表中按 ID 查找
+func FindActiveTask(id int64) *Task {
+	GlobalTaskMux.Lock()
+	defer GlobalTaskMux.Unlock()
+	for _, t := range GlobalTaskList {
+		if t.ID == id {
+			return t
 		}
 	}
+	return nil
+}
 
-	filename := strconv.FormatInt(task.ID, 10) + "." + mediaType
-	filepath := filepath.Join(task.Folder, filename)
-
-	progress := newProgressBar(resp.ContentLength)
-
-	file, err := os.Create(filepath)
+// DownloadMedia 下载一路媒体流。支持暂停/继续（HTTP Range 断点续传）、取消，
+// 以及网络中断后从断点自动重试。
+func DownloadMedia(client *bilibili.BiliClient, _url string, task *Task, mediaType string) error {
+	path := filepath.Join(task.Folder, strconv.FormatInt(task.ID, 10)+"."+mediaType)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	reader := io.TeeReader(resp.Body, file)
-	buf := make([]byte, 1024)
-	for {
-		n, err := reader.Read(buf)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
 
-		progress.add(n)
+	var offset, total int64
+	fails := 0
+	setProgress := func() {
+		if total <= 0 {
+			return
+		}
 		GlobalTaskMux.Lock()
 		if mediaType == "video" {
-			task.VideoProgress = progress.percent()
+			task.VideoProgress = float64(offset) / float64(total)
 		} else {
-			task.AudioProgress = progress.percent()
+			task.AudioProgress = float64(offset) / float64(total)
 		}
 		GlobalTaskMux.Unlock()
 	}
-	return nil
+
+	for {
+		if err := task.gate(); err != nil {
+			return err
+		}
+		before := offset
+		resp, err := client.RangeGET(_url, offset)
+		if err != nil {
+			if fails++; fails > 5 {
+				return err
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+			resp.Body.Close()
+			if fails++; fails > 5 {
+				return fmt.Errorf("下载失败，HTTP %d", resp.StatusCode)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if resp.StatusCode == http.StatusOK && offset > 0 {
+			// 服务器不支持 Range，只能从头再来
+			if err := file.Truncate(0); err != nil {
+				resp.Body.Close()
+				return err
+			}
+			offset = 0
+		}
+		if resp.ContentLength > 0 {
+			total = offset + resp.ContentLength
+			// 合并阶段还会再占用一份空间，所以按剩余部分的 2 倍估算
+			if err := util.CheckDisk(task.Folder, uint64(resp.ContentLength)*2); err != nil {
+				resp.Body.Close()
+				return err
+			}
+		}
+		if _, err := file.Seek(offset, io.SeekStart); err != nil {
+			resp.Body.Close()
+			return err
+		}
+
+		interrupted := false
+		buf := make([]byte, 32*1024)
+		for {
+			paused, canceled := task.ctlState()
+			if canceled {
+				resp.Body.Close()
+				return ErrCanceled
+			}
+			if paused {
+				interrupted = true
+				break
+			}
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, werr := file.Write(buf[:n]); werr != nil {
+					resp.Body.Close()
+					return werr
+				}
+				offset += int64(n)
+				setProgress()
+			}
+			if rerr == io.EOF {
+				break
+			}
+			if rerr != nil {
+				interrupted = true
+				if offset > before {
+					fails = 0
+				} else if fails++; fails > 5 {
+					resp.Body.Close()
+					return rerr
+				}
+				break
+			}
+		}
+		resp.Body.Close()
+		if interrupted {
+			continue
+		}
+		if total > 0 && offset < total {
+			// 连接被提前关闭：从断点继续
+			if offset > before {
+				fails = 0
+			} else if fails++; fails > 5 {
+				return io.ErrUnexpectedEOF
+			}
+			continue
+		}
+		return nil
+	}
 }
 
 type progressBar struct {
