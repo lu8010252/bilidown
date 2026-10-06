@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/base64"
+	"log"
 	"net/http"
 
 	"bilidown/bilibili"
@@ -15,6 +16,7 @@ func getQRInfo(w http.ResponseWriter, r *http.Request) {
 	client := bilibili.BiliClient{}
 	qrInfo, err := client.NewQRInfo()
 	if err != nil {
+		log.Printf("getQRInfo: 请求 B 站二维码接口失败: %v", err)
 		util.Res{Success: false, Message: err.Error()}.Write(w)
 		return
 	}
