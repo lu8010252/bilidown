@@ -22,7 +22,21 @@
 
 ## 部署（docker compose）
 
-前提：机器上已装 Docker 和 docker compose 插件（1Panel 自带）。第一次构建需要联网，构建过程已使用国内镜像（npmmirror、goproxy.cn）。
+前提：机器上已装 Docker 和 docker compose 插件（1Panel 自带）。
+
+### 方式一：直接用现成镜像（推荐，不用下载源码）
+
+每次推送到本分支，GitHub Actions 会自动构建 `ghcr.io/lu8010252/bilidown:latest`（amd64 / arm64 通用）。把仓库里的 `docker-compose.yml` 内容贴到服务器（1Panel 的“编排”里新建即可），改掉访问密码后启动：
+
+```bash
+docker compose up -d
+# 更新到新版本：
+docker compose pull && docker compose up -d
+```
+
+### 方式二：自己从源码构建
+
+第一次构建需要联网，Dockerfile 默认使用国内镜像（npmmirror、goproxy.cn）。把 `docker-compose.yml` 里的 `image:` 一行注释掉、启用 `build: .` 后：
 
 ```bash
 # 1. 下载本仓库的 docker-headless 分支

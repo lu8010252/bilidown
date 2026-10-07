@@ -1,6 +1,9 @@
 services:
   bilidown:
-    build: .
+    # 直接拉取 GitHub Actions 构建好的镜像(amd64 / arm64 自动匹配),不用下载源码
+    image: ghcr.io/lu8010252/bilidown:latest
+    # 想自己本地构建的话,注释掉上面的 image,改用下一行:
+    # build: .
     container_name: bilidown
     restart: unless-stopped
     ports:
