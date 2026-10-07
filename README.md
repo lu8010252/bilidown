@@ -20,17 +20,50 @@
 | `BILIDOWN_DB` | `./data.db` | 数据库路径（容器内为 `/data/data.db`） |
 | `BILIDOWN_MIN_FREE_MB` | 1024 | 保留的最小剩余空间，0 关闭 |
 
-## 部署
+## 部署（docker compose）
+
+前提：机器上已装 Docker 和 docker compose 插件（1Panel 自带）。第一次构建需要联网，构建过程已使用国内镜像（npmmirror、goproxy.cn）。
 
 ```bash
-git clone https://github.com/iuroc/bilidown && cd bilidown
-git apply bilidown-headless.patch     # 或 patch -p1 < bilidown-headless.patch
-# 修改 docker-compose.yml 里的密码和下载目录
+# 1. 下载本仓库的 docker-headless 分支
+git clone -b docker-headless https://github.com/lu8010252/bilidown.git
+cd bilidown
+
+# 2. 修改 docker-compose.yml（至少改掉访问密码）：
+#      BILIDOWN_AUTH=admin:change-me   ->  BILIDOWN_AUTH=你的用户名:你的密码
+#    下载目录默认是 ./download，想放到别的大容量磁盘就改 volumes 里的路径
+
+# 3. 构建并启动（首次需要几分钟；机顶盒内存小，构建时可能偏慢）
 docker compose up -d --build
 ```
 
-浏览器访问 `http://盒子IP:8098`，首次使用先在页面里扫码登录 B 站。
-需要 `ffmpeg`（镜像内已包含；不用 Docker 时请 `apt install ffmpeg`）。
+没有 git 的话，把仓库下载成 zip 解压后进入目录，同样执行第 2、3 步即可。
+
+启动后用浏览器打开 `http://机顶盒IP:8098`，输入上面设置的用户名密码，再在页面里扫码登录 B 站。
+
+### 怎么用
+
+1. 「视频解析」页粘贴 B 站链接 → 选清晰度 / 命名方式 → 下载。
+2. 「任务列表」页可以暂停 / 继续 / 取消下载；顶部开关“下载完成后自动取回”开启时，下载完的文件会自动传到你当前使用的电脑（浏览器下载文件夹），传完服务器上的文件自动删除。也可以勾选多个、或点“取回全部已完成”批量取回。
+3. 第一次自动取回时，Chrome 可能提示“允许此网站下载多个文件”，点允许即可；否则会显示“浏览器没有开始下载”，允许后点 ↓ 重试。
+4. 取回中途断了，服务器上的文件会保留，可以重新取回。
+
+### 常用命令
+
+```bash
+docker compose logs -f              # 看日志
+docker compose restart              # 重启
+docker compose down                 # 停止并删除容器（data、download 目录里的文件不会删）
+git pull && docker compose up -d --build   # 更新到新版本
+```
+
+### 注意
+
+- `./data` 保存登录状态和任务记录，`./download` 是下载中转目录。服务器磁盘小，所以建议保持自动取回开启，下载一个传一个。
+- 剩余空间低于 `BILIDOWN_MIN_FREE_MB`（默认 1024MB）时会拒绝新任务。
+- 二维码加载失败多半是容器 DNS 问题，`docker-compose.yml` 里已指定公共 DNS，可按需修改。
+- 访问密码只是 HTTP Basic，没有 HTTPS，不要直接暴露到公网；公网使用请放在反向代理（带 HTTPS）后面。
+- 页面右上角可切换主题，设置中心有外观设置（背景配色、玻璃效果等）。
 
 ## 来源与许可
 
