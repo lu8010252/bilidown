@@ -1,0 +1,73 @@
+name: Build Windows exe
+
+# 手动运行：Actions 页面 → Build Windows exe → Run workflow，完成后在运行结果底部的 Artifacts 下载
+# 发布版本：推送形如 v1.0.0 的 tag，会自动构建并把 zip 挂到 Releases
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows]
+    paths:
+      - 'client/**'
+      - 'server/**'
+      - 'windows/**'
+      - '.github/workflows/windows-build.yml'
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build frontend
+        working-directory: client
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build bilidown.exe
+        working-directory: server
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go mod tidy
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o ../dist/bilidown/bilidown.exe .
+
+      - name: Download ffmpeg
+        run: |
+          curl -fL --retry 3 -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          unzip -j ffmpeg.zip '*/bin/ffmpeg.exe' -d dist/bilidown/bin
+          cp windows/README.txt dist/bilidown/README.txt
+
+      - name: Pack
+        run: |
+          NAME=bilidown-windows-amd64
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then NAME="${NAME}-${GITHUB_REF_NAME}"; fi
+          echo "ZIP_NAME=${NAME}" >> "$GITHUB_ENV"
+          cd dist && zip -r "${NAME}.zip" bilidown
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: dist/${{ env.ZIP_NAME }}.zip
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ env.ZIP_NAME }}.zip
