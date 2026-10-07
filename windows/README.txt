@@ -2,7 +2,8 @@ Bilidown Windows 版
 ====================
 
 使用：
-1. 把 ffmpeg.exe 放到 bilidown.exe 旁边（或旁边的 bin 文件夹）。
+1. 从 GitHub Actions / Releases 下载的 zip 已自带 ffmpeg（bin\ffmpeg.exe），可跳过这一步；
+   自己编译的话，把 ffmpeg.exe 放到 bilidown.exe 旁边（或旁边的 bin 文件夹）。
    如果你以前装过原版 Bilidown，把它安装目录里 bin\ffmpeg.exe 复制过来即可。
 2. 双击 bilidown.exe。没有黑窗口，右下角系统托盘会出现图标，并自动用默认浏览器打开
    http://127.0.0.1:8098 。首次使用在页面里扫码登录 B 站。
