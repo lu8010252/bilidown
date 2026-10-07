@@ -34,7 +34,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           # GitHub 的构建机在海外，用官方源比国内镜像更稳
           build-args: |
