@@ -1,7 +1,7 @@
 import van, { State } from 'vanjs-core'
 import { Route, goto, now } from 'vanjs-router'
 import { checkLogin, formatBytes, GLOBAL_HAS_LOGIN, VanComponent } from '../mixin'
-import { cancelTask, deleteTask, getActiveTask, getTaskList, pauseTask, resumeTask, showFile } from './data'
+import { cancelTask, clearTasks, deleteTask, getActiveTask, getTaskList, pauseTask, resumeTask, showFile } from './data'
 import { TaskInDB, TaskStatus } from '../work/type'
 import { LoadingBox } from '../view'
 
@@ -151,12 +151,54 @@ export class TaskRoute implements VanComponent {
         )
     }
 
+    /** 清理下载历史：只清记录 / 连文件一起删。排队中和下载中的任务不受影响 */
+    Toolbar() {
+        const _that = this
+        const finished = () => _that.taskList.val.filter(t => t.statusState.val == 'done' || t.statusState.val == 'error')
+        const busy = van.state(false)
+        const run = (mode: 'records' | 'all') => {
+            const n = finished().length
+            const text = mode == 'all'
+                ? `删除 ${n} 条已结束任务的文件，并清理这些下载记录？\n文件删除后无法恢复。正在下载的任务不受影响。`
+                : `清理 ${n} 条已结束任务的下载记录？\n只清记录，已下载的文件会保留。正在下载的任务不受影响。`
+            if (!confirm(text)) return
+            busy.val = true
+            clearTasks(mode).then(() => {
+                _that.taskList.val = _that.taskList.val.filter(t => t.statusState.val != 'done' && t.statusState.val != 'error')
+            }).catch(error => {
+                alert(error.message)
+                // 部分失败时，以服务器为准重新拉取
+                getTaskList(0, 360).then(list => {
+                    if (!list) return
+                    const alive = new Set(list.map(t => t.id))
+                    _that.taskList.val = _that.taskList.val.filter(t => alive.has(t.id))
+                }).catch(() => { })
+            }).finally(() => { busy.val = false })
+        }
+        return () => div({ class: 'hstack gap-2 flex-wrap', hidden: finished().length == 0 },
+            span({ class: 'text-secondary small me-auto' }, `共 ${finished().length} 条已结束的任务`),
+            button({
+                class: 'btn btn-sm btn-outline-secondary',
+                disabled: busy,
+                title: '只清理下载记录，已下载的文件保留',
+                onclick: () => run('records'),
+            }, '清理下载记录'),
+            button({
+                class: 'btn btn-sm btn-outline-danger',
+                disabled: busy,
+                title: '删除已下载的文件，并清理下载记录',
+                onclick: () => run('all'),
+            }, '删除文件并清理记录'),
+        )
+    }
+
     Root() {
         const _that = this
         return Route({
             rule: 'task',
             Loader() {
                 return div({ class: 'vstack gap-3' },
+                    _that.Toolbar(),
                     () => _that.loading.val ? LoadingBox() : '',
                     () => div({ class: 'list-group', hidden: _that.loading.val },
                         _that.taskList.val.map(task => _that.Row(task))

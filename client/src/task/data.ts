@@ -80,3 +80,9 @@ export const deleteTask = async (id: number) => {
     const res = await fetch(`/api/deleteTask?id=${id}`).then(res => res.json()) as ResJSON
     if (!res.success) throw new Error(res.message)
 }
+/** 批量清理已结束（完成/失败）的任务。records：只清记录；all：连文件一起删 */
+export const clearTasks = async (mode: 'records' | 'all'): Promise<number> => {
+    const res = await fetch(`/api/clearTasks?mode=${mode}`).then(res => res.json()) as ResJSON<number>
+    if (!res.success) throw new Error(res.message)
+    return res.data
+}
