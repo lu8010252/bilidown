@@ -1,7 +1,8 @@
 name: Build Windows exe
 
 # 手动运行：Actions 页面 → Build Windows exe → Run workflow，完成后在运行结果底部的 Artifacts 下载
-# 发布正式版：Actions 页面 → Run workflow，在 version 里填 v1.0.0；或推送形如 v1.0.0 的 tag。都会把 zip 挂到 Releases
+# 发布正式版（最简单）：修改 windows/VERSION 里的版本号并推送，会自动发布成同名 Release（已发布过的版本只补传缺失的 zip）。
+# 也可以：Actions 页面 → Run workflow，在 version 里填 v1.0.0；或推送形如 v1.0.0 的 tag。都会把 zip 挂到 Releases
 on:
   workflow_dispatch:
     inputs:
@@ -71,11 +72,16 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           NAME=bilidown-windows-amd64
+          # 显式指定的版本：手动运行填写的 version，或推送的 tag
           VERSION="${INPUT_VERSION}"
           if [ -z "$VERSION" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then VERSION="${GITHUB_REF_NAME}"; fi
           if [ -n "$VERSION" ]; then NAME="${NAME}-${VERSION}"; fi
+          # 文件版本：windows/VERSION 里的版本号（tag 名与文件内容完全一致）
+          FILE_VERSION=""
+          if [ -z "$VERSION" ] && [ -f windows/VERSION ]; then FILE_VERSION="$(tr -d ' \r\n' < windows/VERSION)"; fi
           echo "ZIP_NAME=${NAME}" >> "$GITHUB_ENV"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "FILE_VERSION=${FILE_VERSION}" >> "$GITHUB_ENV"
           cd dist && zip -r "${NAME}.zip" bilidown
 
       # Artifact 上传目录而不是 zip：GitHub 会自动把 artifact 打成 zip，
@@ -89,13 +95,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "${VERSION}" ]; then
-            if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release upload "$VERSION" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" --clobber
+          # 发布 / 补传某个版本：不存在就创建；已存在则只在缺少该 zip 时补传，不覆盖已有文件
+          publish_version() {
+            local tag="$1" zip="$2" force="$3"
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              if [ "$force" = "1" ] || ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qxF "$(basename "$zip")"; then
+                gh release upload "$tag" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+              fi
             else
-              gh release create "$VERSION" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
-                --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+              gh release create "$tag" "$zip" --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" --title "$tag" --generate-notes
             fi
+          }
+
+          if [ -n "${VERSION}" ]; then
+            publish_version "$VERSION" "dist/${ZIP_NAME}.zip" 1
           else
             # 推送分支：更新固定的 windows-latest 发布，始终是最新构建
             TAG="windows-latest"
@@ -104,4 +118,10 @@ jobs:
               --target "$GITHUB_SHA" --prerelease \
               --title "Windows 最新构建" \
               --notes "由 ${GITHUB_SHA::7} 自动构建，解压后双击 bilidown.exe（已含 ffmpeg）。"
+            # windows/VERSION 里的版本号：自动发布成正式版
+            if [ -n "${FILE_VERSION}" ]; then
+              VZIP="dist/bilidown-windows-amd64-${FILE_VERSION}.zip"
+              cp "dist/${ZIP_NAME}.zip" "$VZIP"
+              publish_version "$FILE_VERSION" "$VZIP" 0
+            fi
           fi
