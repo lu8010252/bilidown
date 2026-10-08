@@ -300,3 +300,50 @@ func deleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 	util.Res{Success: true, Message: "删除成功"}.Write(w)
 }
+
+// clearTasks 批量清理已结束（完成/失败）的任务；排队中和下载中的任务不受影响。
+// mode=records：只清理下载记录，保留文件；mode=all：同时删除文件。
+func clearTasks(w http.ResponseWriter, r *http.Request) {
+	mode := r.FormValue("mode")
+	if mode != "records" && mode != "all" {
+		util.Res{Success: false, Message: "参数错误"}.Write(w)
+		return
+	}
+	db := util.MustGetDB()
+	defer db.Close()
+	tasks, err := task.GetTaskList(db, 0, 1000000)
+	if err != nil {
+		util.Res{Success: false, Message: fmt.Sprintf("task.GetTaskList: %v", err)}.Write(w)
+		return
+	}
+	cleared, failed := 0, 0
+	var firstErr error
+	for i := range tasks {
+		t := &tasks[i]
+		if t.Status != "done" && t.Status != "error" {
+			continue
+		}
+		if mode == "all" {
+			if err := os.Remove(t.FilePath()); err != nil && !os.IsNotExist(err) {
+				failed++
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue // 文件删不掉就保留记录，避免留下找不到的文件
+			}
+		}
+		if err := task.DeleteTask(db, t.ID); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		cleared++
+	}
+	if failed > 0 {
+		util.Res{Success: false, Message: fmt.Sprintf("已清理 %d 条，%d 条失败：%v", cleared, failed, firstErr)}.Write(w)
+		return
+	}
+	util.Res{Success: true, Message: fmt.Sprintf("已清理 %d 条", cleared), Data: cleared}.Write(w)
+}
