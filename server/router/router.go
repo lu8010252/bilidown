@@ -1,0 +1,138 @@
+package router
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+
+	"bilidown/util"
+	"bilidown/util/res_error"
+)
+
+// Headless 为 true 表示无头（服务器 / Docker）模式，由 main 在启动时设置：
+// 无头模式提供 /fetchFile（把文件传到浏览器所在电脑并删除服务器文件），不提供 /showFile；
+// 本机模式反之——/showFile 会在运行程序的电脑上调用 explorer/open/xdg-open，无头部署下既无意义又有风险。
+var Headless bool
+
+func API() *http.ServeMux {
+	router := http.NewServeMux()
+	router.HandleFunc("/getVideoInfo", getVideoInfo)
+	router.HandleFunc("/getSeasonInfo", getSeasonInfo)
+	router.HandleFunc("/getQRInfo", getQRInfo)
+	router.HandleFunc("/getQRStatus", getQRStatus)
+	router.HandleFunc("/checkLogin", checkLogin)
+	router.HandleFunc("/getPlayInfo", getPlayInfo)
+	router.HandleFunc("/createTask", createTask)
+	router.HandleFunc("/getActiveTask", getActiveTask)
+	router.HandleFunc("/getTaskList", getTaskList)
+	if Headless {
+		router.HandleFunc("/fetchFile", fetchFile)
+	} else {
+		router.HandleFunc("/showFile", showFile)
+	}
+	router.HandleFunc("/mode", mode)
+	router.HandleFunc("/pauseTask", pauseTask)
+	router.HandleFunc("/resumeTask", resumeTask)
+	router.HandleFunc("/cancelTask", cancelTask)
+	router.HandleFunc("/getFields", getFields)
+	router.HandleFunc("/saveFields", saveFields)
+	router.HandleFunc("/logout", logout)
+	router.HandleFunc("/quit", quit)
+	router.HandleFunc("/getPopularVideos", getPopularVideos)
+	router.HandleFunc("/deleteTask", deleteTask)
+	router.HandleFunc("/clearTasks", clearTasks)
+	router.HandleFunc("/getRedirectedLocation", getRedirectedLocation)
+	router.HandleFunc("/getSeasonsArchivesListFirstBvid", getSeasonsArchivesListFirstBvid)
+	router.HandleFunc("/getFavList", getFavList)
+	return router
+}
+
+// mode 告诉前端当前是无头模式还是本机模式，以决定任务页显示“取回”还是“打开位置”
+func mode(w http.ResponseWriter, r *http.Request) {
+	util.Res{Success: true, Data: map[string]bool{"headless": Headless}}.Write(w)
+}
+
+func getRedirectedLocation(w http.ResponseWriter, r *http.Request) {
+	if r.ParseForm() != nil {
+		res_error.Send(w, res_error.ParamError)
+		return
+	}
+	url := r.FormValue("url")
+	if !util.IsValidURL(url) {
+		res_error.Send(w, res_error.URLFormatError)
+		return
+	}
+	if location, err := util.GetRedirectedLocation(url); err != nil {
+		res_error.Send(w, res_error.NoLocationError)
+		return
+	} else {
+		util.Res{Success: true, Message: "获取成功", Data: location}.Write(w)
+		return
+	}
+}
+
+func quit(w http.ResponseWriter, r *http.Request) {
+	util.Res{Success: true, Message: "退出成功"}.Write(w)
+	go func() {
+		os.Exit(0)
+	}()
+}
+
+func getFields(w http.ResponseWriter, r *http.Request) {
+	db := util.MustGetDB()
+	defer db.Close()
+
+	fields, err := util.GetFields(db, util.FieldUtil{}.AllowSelect()...)
+	if err != nil {
+		util.Res{Success: false, Message: err.Error()}.Write(w)
+		return
+	}
+	util.Res{Success: true, Data: fields}.Write(w)
+}
+
+func saveFields(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		util.Res{Success: false, Message: "不支持的请求方法"}.Write(w)
+		return
+	}
+	defer r.Body.Close()
+	var body [][2]string
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		util.Res{Success: false, Message: "参数错误"}.Write(w)
+		return
+	}
+
+	db := util.MustGetDB()
+	defer db.Close()
+
+	fu := util.FieldUtil{}
+
+	for _, d := range body {
+		if !fu.IsAllowUpdate(d[0]) {
+			util.Res{Success: false, Message: fmt.Sprintf("字段 %s 不允许修改", d[0])}.Write(w)
+			return
+		}
+
+		if d[0] == "download_folder" {
+			if _, err := os.Stat(d[1]); os.IsNotExist(err) {
+				if err := os.MkdirAll(d[1], os.ModePerm); err != nil {
+					util.Res{Success: false, Message: fmt.Sprintf("目录创建失败：%s", d[1])}.Write(w)
+					return
+				}
+			} else if err != nil {
+				util.Res{Success: false, Message: fmt.Sprintf("路径设置失败：%v", err)}.Write(w)
+				return
+			}
+		}
+	}
+
+	err = util.SaveFields(db, body)
+	if err != nil {
+		util.Res{Success: false, Message: err.Error()}.Write(w)
+		return
+	}
+	util.Res{Success: true, Message: "保存成功"}.Write(w)
+}

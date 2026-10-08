@@ -1,0 +1,50 @@
+name: Build and push Docker image
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "LICENSE"
+      - "windows/**"
+      - "Dockerfile.windows"
+      - ".github/workflows/windows-build.yml"
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/lu8010252/bilidown
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          # GitHub 的构建机在海外，用官方源比国内镜像更稳
+          build-args: |
+            NPM_REGISTRY=https://registry.npmjs.org
+            GOPROXY=https://proxy.golang.org,direct
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
