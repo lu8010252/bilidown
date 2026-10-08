@@ -1,9 +1,14 @@
 name: Build Windows exe
 
 # 手动运行：Actions 页面 → Build Windows exe → Run workflow，完成后在运行结果底部的 Artifacts 下载
-# 发布版本：推送形如 v1.0.0 的 tag，会自动构建并把 zip 挂到 Releases
+# 发布正式版：Actions 页面 → Run workflow，在 version 里填 v1.0.0；或推送形如 v1.0.0 的 tag。都会把 zip 挂到 Releases
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: '正式版本号，如 v1.0.0（留空则只构建，更新 windows-latest 预发布）'
+        required: false
+        default: ''
   push:
     branches: [windows]
     paths:
@@ -62,10 +67,15 @@ jobs:
           cp windows/README.txt dist/bilidown/README.txt
 
       - name: Pack
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           NAME=bilidown-windows-amd64
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then NAME="${NAME}-${GITHUB_REF_NAME}"; fi
+          VERSION="${INPUT_VERSION}"
+          if [ -z "$VERSION" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then VERSION="${GITHUB_REF_NAME}"; fi
+          if [ -n "$VERSION" ]; then NAME="${NAME}-${VERSION}"; fi
           echo "ZIP_NAME=${NAME}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           cd dist && zip -r "${NAME}.zip" bilidown
 
       # Artifact 上传目录而不是 zip：GitHub 会自动把 artifact 打成 zip，
@@ -79,10 +89,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME}"
-            gh release create "$TAG" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
-              --title "$TAG" --generate-notes
+          if [ -n "${VERSION}" ]; then
+            if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$VERSION" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              gh release create "$VERSION" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+            fi
           else
             # 推送分支：更新固定的 windows-latest 发布，始终是最新构建
             TAG="windows-latest"
