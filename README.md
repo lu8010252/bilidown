@@ -4,7 +4,7 @@
 
 | 运行方式 | 适用 | 说明 |
 | --- | --- | --- |
-| **Windows 本机版**（默认构建） | Windows 电脑本机使用 | 和上游一样是独立程序：双击 `bilidown.exe`，系统托盘图标，自动打开浏览器；页面和图标已打包进 exe，只需再放一个 `ffmpeg.exe`。只监听 127.0.0.1，文件直接存本机，任务列表有“打开位置” |
+| **Windows 本机版**（默认构建） | Windows 电脑本机使用 | 和上游一样是独立程序：双击 `bilidown.exe`，系统托盘图标，自动打开浏览器；页面、图标和精简版 ffmpeg 都已打包进 exe，只有一个文件（自己编译时需自备 `ffmpeg.exe`，放在 exe 旁边）。只监听 127.0.0.1，文件直接存本机，任务列表有“打开位置” |
 | **Docker 无头版**（`-tags headless`） | 服务器 / 机顶盒（arm64 / amd64 / armv7） | 无托盘、无头运行，浏览器访问；下载完成后可自动 / 批量“取回”到你当前使用的电脑，传完服务器自动删除文件，适合磁盘很小的设备做临时中转；可选访问密码 |
 
 ## 两种方式共有的改动
@@ -18,13 +18,13 @@
 
 ## 构建与发布
 
-- **Windows**：推送到 `main` 后 GitHub Actions 自动构建 `bilidown.exe`（附带上游精简版 ffmpeg）并更新 `windows-latest` 预发布；把 `windows/VERSION` 里的版本号改掉并推送，会自动发布同名正式 Release。本机构建见 `windows/build-windows.bat` 或 `Dockerfile.windows`。
+- **Windows**：推送到 `main` 后 GitHub Actions 自动构建 `bilidown.exe`（内置上游精简版 ffmpeg，构建时带 `-tags embedffmpeg`）并更新 `windows-latest` 预发布；把 `windows/VERSION` 里的版本号改掉并推送，会自动发布同名正式 Release。本机构建见 `windows/build-windows.bat` 或 `Dockerfile.windows`。
 - **Docker**：推送到 `main` 后自动构建并推送 `ghcr.io/lu8010252/bilidown:latest`（`Dockerfile` 里用 `go build -tags headless`）。
 - 前端会向后端的 `/api/mode` 询问当前是哪种方式：无头版显示“取回”相关按钮，本机版显示“打开位置”。后端同理：`/api/fetchFile` 只在无头版注册，`/api/showFile` 只在本机版注册（后者会在运行程序的电脑上调用 explorer，不能暴露在服务器上）。
 
 ## Windows 本机版使用
 
-下载 [Releases](../../releases) 里的 zip，解压后双击 `bilidown.exe`（已含 ffmpeg），会自动打开浏览器；托盘图标右键可“打开主界面 / 打开下载目录 / 退出”。数据库、下载目录、日志（`bilidown.log`）都在程序所在目录。端口可用环境变量 `BILIDOWN_PORT` 修改。
+下载 [Releases](../../releases) 里的 zip，解压后双击 `bilidown.exe`（已内置 ffmpeg），会自动打开浏览器；托盘图标右键可“打开主界面 / 打开下载目录 / 退出”。数据库、下载目录、日志（`bilidown.log`）都在程序所在目录。端口可用环境变量 `BILIDOWN_PORT` 修改。
 
 ## Docker 无头版使用
 

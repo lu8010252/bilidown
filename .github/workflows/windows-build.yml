@@ -44,6 +44,19 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      # ffmpeg 取自上游 iuroc/bilidown 发布包里的精简版（约 11 MB，只含合并音视频所需功能），
+      # 不用完整版（约 100 MB）。固定版本并校验 SHA256，防止下载内容被替换。
+      # 下载后放进 server/ffmpeg，构建时用 go:embed 打进 bilidown.exe，所以发布包里只有一个 exe。
+      - name: Download ffmpeg (from upstream release)
+        env:
+          UPSTREAM_TAG: v2.1.1
+          FFMPEG_SHA256: b8033a449be3b0b6235b2bbef0837adf79ea3545a78300f81ba21510d231494d
+        run: |
+          curl -fL --retry 3 -o upstream.zip "https://github.com/iuroc/bilidown/releases/download/${UPSTREAM_TAG}/bilidown_Windows_x86_64.zip"
+          mkdir -p server/ffmpeg
+          unzip -j upstream.zip 'bin/ffmpeg.exe' -d server/ffmpeg
+          echo "${FFMPEG_SHA256}  server/ffmpeg/ffmpeg.exe" | sha256sum -c -
+
       - name: Build bilidown.exe
         working-directory: server
         env:
@@ -52,20 +65,10 @@ jobs:
           GOARCH: amd64
         run: |
           go mod tidy
-          go build -trimpath -ldflags="-s -w -H=windowsgui" -o ../dist/bilidown/bilidown.exe .
+          go build -tags embedffmpeg -trimpath -ldflags="-s -w -H=windowsgui" -o ../dist/bilidown/bilidown.exe .
 
-      # ffmpeg 取自上游 iuroc/bilidown 发布包里的精简版（约 11 MB，只含合并音视频所需功能），
-      # 不用完整版（约 100 MB）。固定版本并校验 SHA256，防止下载内容被替换。
-      - name: Download ffmpeg (from upstream release)
-        env:
-          UPSTREAM_TAG: v2.1.1
-          FFMPEG_SHA256: b8033a449be3b0b6235b2bbef0837adf79ea3545a78300f81ba21510d231494d
-        run: |
-          curl -fL --retry 3 -o upstream.zip "https://github.com/iuroc/bilidown/releases/download/${UPSTREAM_TAG}/bilidown_Windows_x86_64.zip"
-          mkdir -p dist/bilidown/bin
-          unzip -j upstream.zip 'bin/ffmpeg.exe' -d dist/bilidown/bin
-          echo "${FFMPEG_SHA256}  dist/bilidown/bin/ffmpeg.exe" | sha256sum -c -
-          cp windows/README.txt dist/bilidown/README.txt
+      - name: Add readme
+        run: cp windows/README.txt dist/bilidown/README.txt
 
       - name: Pack
         env:
@@ -117,7 +120,7 @@ jobs:
             gh release create "$TAG" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --prerelease \
               --title "Windows 最新构建" \
-              --notes "由 ${GITHUB_SHA::7} 自动构建，解压后双击 bilidown.exe（已含 ffmpeg）。"
+              --notes "由 ${GITHUB_SHA::7} 自动构建，解压后双击 bilidown.exe（已内置 ffmpeg）。"
             # windows/VERSION 里的版本号：自动发布成正式版
             if [ -n "${FILE_VERSION}" ]; then
               VZIP="dist/bilidown-windows-amd64-${FILE_VERSION}.zip"

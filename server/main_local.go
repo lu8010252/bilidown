@@ -48,6 +48,10 @@ func main() {
 	}
 	urlLocal = fmt.Sprintf("http://127.0.0.1:%d", port)
 
+	// 用户自己放的 ffmpeg 优先；找不到再释放内置的（内置构建才有）
+	if _, err := util.GetFFmpegPath(); err != nil {
+		extractEmbeddedFFmpeg()
+	}
 	if _, err := util.GetFFmpegPath(); err != nil {
 		showError("Bilidown", "找不到 ffmpeg.exe。\n请把 ffmpeg.exe 放到 bilidown.exe 所在目录（或其 bin 子目录）后重新运行。")
 		os.Exit(1)

@@ -71,6 +71,9 @@ func probeFFmpeg(path string) bool {
 	return cmd.Run() == nil
 }
 
+// EmbeddedFFmpegPath 是内置 ffmpeg 释放后的路径（仅内置构建会设置），其他位置都找不到时才使用。
+var EmbeddedFFmpegPath string
+
 // GetFFmpegPath 获取可用的 FFmpeg 执行路径。
 func GetFFmpegPath() (string, error) {
 	if probeFFmpeg("ffmpeg") {
@@ -87,6 +90,9 @@ func GetFFmpegPath() (string, error) {
 				return c, nil
 			}
 		}
+	}
+	if EmbeddedFFmpegPath != "" && probeFFmpeg(EmbeddedFFmpegPath) {
+		return EmbeddedFFmpegPath, nil
 	}
 	return "", errors.New("ffmpeg not found")
 }
