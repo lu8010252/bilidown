@@ -276,7 +276,7 @@ func clearTasks(w http.ResponseWriter, r *http.Request) {
 				continue // 文件删不掉就保留记录，避免留下找不到的文件
 			}
 		}
-		if err := task.DeleteTask(db, t.ID); err != nil {
+		if err := task.DeleteTask(db, int(t.ID)); err != nil {
 			failed++
 			if firstErr == nil {
 				firstErr = err
