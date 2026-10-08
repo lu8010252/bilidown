@@ -95,7 +95,7 @@ func onReady() {
 			case <-folder.ClickedCh:
 				openDownloadFolder()
 			case <-about.ClickedCh:
-				openBrowser("https://github.com/iuroc/bilidown")
+				openBrowser("https://github.com/lu8010252/bilidown/tree/windows")
 			case <-quit.ClickedCh:
 				log.Printf("Bilidown has exited.")
 				systray.Quit()
