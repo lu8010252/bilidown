@@ -67,7 +67,19 @@ jobs:
           path: dist/${{ env.ZIP_NAME }}.zip
 
       - name: Publish release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/${{ env.ZIP_NAME }}.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            gh release create "$TAG" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --generate-notes
+          else
+            # 推送分支：更新固定的 windows-latest 发布，始终是最新构建
+            TAG="windows-latest"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+            gh release create "$TAG" "dist/${ZIP_NAME}.zip" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease \
+              --title "Windows 最新构建" \
+              --notes "由 ${GITHUB_SHA::7} 自动构建，解压后双击 bilidown.exe（已含 ffmpeg）。"
+          fi

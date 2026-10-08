@@ -14,7 +14,7 @@
 **推荐：用 GitHub Actions 自动打包（不用装任何环境，已自带 ffmpeg）**
 
 - 手动：仓库 Actions 页 → `Build Windows exe` → `Run workflow`，跑完在页面底部 Artifacts 下载 zip，解压后双击 `bilidown.exe`。
-- 发布：推送 `v1.0.0` 这样的 tag，会自动把 zip 放到 Releases。
+- 发布：每次构建都会更新 Releases 里的 `windows-latest`（最新构建）；推送 `v1.0.0` 这样的 tag 会另发一个正式版本。
 - 推送 `windows` 分支（改了 client / server / windows 目录）也会自动构建。
 
 **本地构建**，任选一种，产物在 `dist-windows`：
