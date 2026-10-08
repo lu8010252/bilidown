@@ -48,10 +48,17 @@ jobs:
           go mod tidy
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o ../dist/bilidown/bilidown.exe .
 
-      - name: Download ffmpeg
+      # ffmpeg 取自上游 iuroc/bilidown 发布包里的精简版（约 11 MB，只含合并音视频所需功能），
+      # 不用完整版（约 100 MB）。固定版本并校验 SHA256，防止下载内容被替换。
+      - name: Download ffmpeg (from upstream release)
+        env:
+          UPSTREAM_TAG: v2.1.1
+          FFMPEG_SHA256: b8033a449be3b0b6235b2bbef0837adf79ea3545a78300f81ba21510d231494d
         run: |
-          curl -fL --retry 3 -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
-          unzip -j ffmpeg.zip '*/bin/ffmpeg.exe' -d dist/bilidown/bin
+          curl -fL --retry 3 -o upstream.zip "https://github.com/iuroc/bilidown/releases/download/${UPSTREAM_TAG}/bilidown_Windows_x86_64.zip"
+          mkdir -p dist/bilidown/bin
+          unzip -j upstream.zip 'bin/ffmpeg.exe' -d dist/bilidown/bin
+          echo "${FFMPEG_SHA256}  dist/bilidown/bin/ffmpeg.exe" | sha256sum -c -
           cp windows/README.txt dist/bilidown/README.txt
 
       - name: Pack
@@ -61,10 +68,12 @@ jobs:
           echo "ZIP_NAME=${NAME}" >> "$GITHUB_ENV"
           cd dist && zip -r "${NAME}.zip" bilidown
 
+      # Artifact 上传目录而不是 zip：GitHub 会自动把 artifact 打成 zip，
+      # 如果这里再传 zip 文件就会变成“压缩包套压缩包”。
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
-          path: dist/${{ env.ZIP_NAME }}.zip
+          path: dist/bilidown
 
       - name: Publish release
         env:
