@@ -9,6 +9,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -151,6 +154,26 @@ func cancelTask(w http.ResponseWriter, r *http.Request) {
 		}
 		util.Res{Success: true, Message: "已取消"}.Write(w)
 	}
+}
+
+// showFile 仅本机模式注册：在资源管理器/访达中定位已完成任务的文件
+func showFile(w http.ResponseWriter, r *http.Request) {
+	t, ok := lookupDoneTask(w, r)
+	if !ok {
+		return
+	}
+	path := t.FilePath()
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", "/select,"+path)
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	default:
+		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	}
+	_ = cmd.Start() // explorer 即使成功也常返回非 0，只管启动
+	util.Res{Success: true, Message: "已打开"}.Write(w)
 }
 
 func getActiveTask(w http.ResponseWriter, r *http.Request) {
